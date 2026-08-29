@@ -16,6 +16,7 @@ Architecture (what happens when a user asks a question):
 import os
 import requests
 from dotenv import load_dotenv
+import osm_client
 
 # --- LangChain imports ---
 # ChatAnthropic: the bridge between LangChain and Claude's API
@@ -95,6 +96,81 @@ def get_weather(city: str) -> str:
     except requests.exceptions.RequestException as e:
         return f"Weather API request failed: {e}"
 
+@tool
+def search_restaurants(city: str) -> str:
+    """Find restaurants in a specific city for travel planning.
+    
+    Use this tool when the user asks about:
+    - Places to eat or dining options in a destination
+    - Restaurant recommendations for a trip
+    - Food or cuisine available in a city they're visiting
+    
+    Do NOT use this tool for:
+    - Weather questions (use get_weather instead)
+    - Sightseeing or things to do (use search_attractions instead)
+    
+    Args:
+        city: The city to search in. Include state or country for clarity
+              (e.g., "Austin, TX", "Paris, France", "Tokyo").
+    
+    Returns:
+        A formatted list of up to 5 restaurants with name, cuisine, and address.
+        Returns an error message if the city can't be found.
+    """
+    try:
+        restaurants = osm_client.search_restaurants(city)
+        if not restaurants:
+            return f"No restaurants found in {city}."
+        
+        lines = [f"Restaurants in {city}:"]
+        for r in restaurants:
+            lines.append(f"- {r['name']} ({r['type']}) at {r['address']}")
+        return "\n".join(lines)
+    
+    except ValueError:
+        # Nominatim couldn't geocode the city — it's not a real place
+        return f"Could not find city '{city}'. Please provide a valid city name."
+    except Exception as e:
+        # Any other failure (network, timeout, etc.) — skip and note
+        return f"Restaurant search unavailable right now: {str(e)}"
+
+
+@tool
+def search_attractions(city: str) -> str:
+    """Find tourist attractions, museums, and landmarks in a specific city.
+    
+    Use this tool when the user asks about:
+    - Things to do or see in a destination
+    - Sightseeing, tourist spots, or points of interest
+    - Museums, galleries, landmarks, or scenic viewpoints
+    
+    Do NOT use this tool for:
+    - Weather questions (use get_weather instead)
+    - Restaurants or food (use search_restaurants instead)
+    
+    Args:
+        city: The city to search in. Include state or country for clarity
+              (e.g., "Austin, TX", "Paris, France", "Tokyo").
+    
+    Returns:
+        A formatted list of up to 5 attractions with name, type, and address.
+        Returns an error message if the city can't be found.
+    """
+    try:
+        attractions = osm_client.search_attractions(city)
+        if not attractions:
+            return f"No attractions found in {city}."
+        
+        lines = [f"Attractions in {city}:"]
+        for a in attractions:
+            lines.append(f"- {a['name']} ({a['type']}) at {a['address']}")
+        return "\n".join(lines)
+    
+    except ValueError:
+        return f"Could not find city '{city}'. Please provide a valid city name."
+    except Exception as e:
+        return f"Attractions search unavailable right now: {str(e)}"
+
 
 # ---------------------------------------------------------------
 # 3. INITIALIZE THE LLM
@@ -121,15 +197,20 @@ llm = ChatAnthropic(
 # (think → use tool → read result → think again) before giving
 # a final answer.
 SYSTEM_PROMPT = (
-    "You are a helpful travel research assistant. "
-    "When users ask about weather in a destination, use the get_weather tool. "
-    "For other travel questions, answer from your general knowledge. "
-    "Keep responses concise and practical for travelers."
+    "You are a helpful travel research assistant with access to three tools:\n"
+    "  - get_weather: for current weather in any city\n"
+    "  - search_restaurants: for dining recommendations in any city\n"
+    "  - search_attractions: for sightseeing, museums, and landmarks in any city\n"
+    "\n"
+    "When a user asks about a destination, use these tools to gather live data "
+    "rather than relying on your training knowledge. For trip planning questions "
+    "that touch multiple topics (weather AND food AND attractions), call all "
+    "relevant tools before answering. Keep final responses concise and practical."
 )
 
 agent = create_react_agent(
     model=llm,
-    tools=[get_weather],
+    tools=[get_weather, search_restaurants, search_attractions],
     prompt=SYSTEM_PROMPT,
 )
 
