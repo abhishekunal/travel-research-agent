@@ -6,6 +6,16 @@ A conversational AI agent for travel research, built as a portfolio project to d
 
 ---
 
+## Roadmap
+
+- [x] **Weekend 1** — Walking skeleton: LangChain agent, one tool (weather), Streamlit UI
+- [ ] **Weekend 2** — Multi-tool orchestration + structured output (attractions, restaurants, Pydantic schemas, input validation)
+- [ ] **Weekend 3** — TBD (likely: real conversation memory + polish/deployment)
+- [ ] **Weekend 4** — TBD (likely: evaluation harness + advanced patterns like RAG or MCP)
+
+Detailed plans for each weekend live in `WEEKEND_N_PLAN.md` files as they're scoped.
+---
+
 ## What it does
 
 Ask the agent travel-related questions in natural language and it responds conversationally. It can:
@@ -122,15 +132,6 @@ travel-research-agent/
 ```
 
 ---
-
-## Roadmap
-
-- [x] **Weekend 1** — Walking skeleton: LangChain agent, one tool (weather), Streamlit UI
-- [ ] **Weekend 2** — Multi-tool orchestration + structured output (attractions, restaurants, Pydantic schemas, input validation)
-- [ ] **Weekend 3** — TBD (likely: real conversation memory + polish/deployment)
-- [ ] **Weekend 4** — TBD (likely: evaluation harness + advanced patterns like RAG or MCP)
-
-Detailed plans for each weekend live in `WEEKEND_N_PLAN.md` files as they're scoped.
 
 ---
 
