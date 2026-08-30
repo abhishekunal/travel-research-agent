@@ -17,6 +17,8 @@ import os
 import requests
 from dotenv import load_dotenv
 import osm_client
+from datetime import date
+from schemas import TripBrief
 
 # --- LangChain imports ---
 # ChatAnthropic: the bridge between LangChain and Claude's API
@@ -205,7 +207,9 @@ SYSTEM_PROMPT = (
     "When a user asks about a destination, use these tools to gather live data "
     "rather than relying on your training knowledge. For trip planning questions "
     "that touch multiple topics (weather AND food AND attractions), call all "
-    "relevant tools before answering. Keep final responses concise and practical."
+    "relevant tools before answering. Always call get_weather when a destination "
+    "is mentioned, even for future trips — current conditions give useful context. "
+    "Keep final responses concise and practical."
 )
 
 agent = create_react_agent(
@@ -228,15 +232,70 @@ def run_agent(user_query: str) -> str:
     # The last message in the list is Claude's final answer
     return result["messages"][-1].content
 
+# ---------------------------------------------------------------
+# 6. STRUCTURED OUTPUT VIA POST-PROCESSING
+# ---------------------------------------------------------------
+# Stage 2 of the two-stage pattern: take the agent's free-form prose
+# and convert it into a TripBrief object.
+#
+# We call Claude a second time with a strict instruction to produce
+# only JSON. Pydantic then parses and validates that JSON.
+def to_trip_brief(user_query: str, agent_response: str) -> TripBrief:
+    """Convert the agent's prose response into a structured TripBrief.
+
+    Args:
+        user_query: The original user question (has dates, destination)
+        agent_response: The agent's prose answer (has weather + place data)
+
+    Returns:
+        A validated TripBrief object.
+
+    Raises:
+        pydantic.ValidationError: if the LLM's JSON doesn't match the schema.
+    """
+    # We use the same LLM but bind it to the TripBrief schema.
+    # with_structured_output() tells Claude "return output that matches
+    # this Pydantic model" — LangChain handles the JSON schema conversion
+    # under the hood.
+    structured_llm = llm.with_structured_output(TripBrief)
+
+    # The prompt has one job: extract fields from the two inputs.
+    # We're not asking Claude to think or plan here — just to format.
+    formatting_prompt = f"""Convert the following travel research response into a structured trip brief.
+
+Original user question:
+{user_query}
+
+Agent's research findings:
+{agent_response}
+
+Instructions:
+- Extract destination, start_date, and end_date from the user's question.
+- Use today's date as context if the user gave a year-less date like "Dec 15-17".
+- Summarize the weather findings into weather_summary.
+- Extract each restaurant and attraction as a Place with name, type, and address.
+- If the agent noted any data was unavailable, add that to notes.
+- If no restaurants or attractions were found, leave those lists empty.
+
+Today's date is {date.today().isoformat()}."""
+
+    return structured_llm.invoke(formatting_prompt)
 
 # ---------------------------------------------------------------
-# 6. QUICK TEST (only runs if you execute this file directly)
+# 7. QUICK TEST (only runs if you execute this file directly)
 # ---------------------------------------------------------------
 if __name__ == "__main__":
-    # This block runs when you type: python agent.py
-    # It does NOT run when Streamlit imports this file
-    print("Testing agent...\n")
+    print("Testing agent with structured output...\n")
 
-    test_query = "What's the weather like in Tokyo right now?"
-    print(f"Query: {test_query}")
-    print(f"Response:\n{run_agent(test_query)}")
+    test_query = "Plan a trip to Austin, TX from Dec 15 to Dec 17, 2026. What's the weather, where should I eat, and what should I see?"
+    print(f"Query: {test_query}\n")
+
+    # Stage 1: get the prose response
+    prose_response = run_agent(test_query)
+    print("── Prose response ──")
+    print(prose_response)
+
+    # Stage 2: convert to structured TripBrief
+    print("\n── Structured TripBrief ──")
+    trip_brief = to_trip_brief(test_query, prose_response)
+    print(trip_brief.model_dump_json(indent=2))
