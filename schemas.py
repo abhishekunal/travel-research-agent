@@ -144,6 +144,43 @@ class Intent(BaseModel):
             )
         return end_date
 
+# ── ScopeResult: the internal return type of the scope node's LLM call ──
+# Scope needs to return three linked outputs together: what it extracted
+# (Intent), what it couldn't extract (missing_fields), and — if there are
+# gaps — a question to ask the user. Bundling them into one model lets us
+# do a single .with_structured_output() call instead of three.
+#
+# This is a helper type for scope_node's implementation. It's not part of
+# the graph state; it gets unpacked into TripState fields after the call.
+class ScopeResult(BaseModel):
+    """Bundled output of the scope stage's LLM call."""
+
+    intent: Intent = Field(
+        description="Structured trip intent extracted from conversation"
+    )
+
+    missing_fields: list[str] = Field(
+        default_factory=list,
+        description="Required fields (city, start_date, end_date) that couldn't be extracted"
+    )
+
+    clarifying_question: str | None = Field(
+        default=None,
+        description="One natural-sounding question to ask the user if missing_fields is non-empty; None if intent is complete"
+    )
+# ── SynthesisResult: the internal return type of the synthesize node ──
+# Bundles the structured TripBrief with the reasoning narrative so we can
+# get both in a single LLM call. Same helper-model pattern as ScopeResult.
+class SynthesisResult(BaseModel):
+    """Bundled output of the synthesize stage's LLM call."""
+
+    trip_brief: TripBrief = Field(
+        description="Structured trip brief composed from research findings"
+    )
+
+    reasoning: str = Field(
+        description="Two to four sentences explaining why these specific picks fit the traveler, and noting any data gaps or tradeoffs"
+    )
 
 # ── TripState: the shared "clipboard" flowing through the graph ──────
 # Every LangGraph node reads from and writes to this single object.
