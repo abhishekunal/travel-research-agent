@@ -1,135 +1,138 @@
 """
-Travel Research Agent — LLM + ReAct agent + structured output
-==============================================================
+Travel Research Agent — LangGraph StateGraph
+=============================================
 This module owns:
-  - The LLM (Claude via ChatAnthropic)
-  - The ReAct agent that wires the LLM to tools
-  - The two-stage structured output post-processing (to_trip_brief)
+  - The compiled LangGraph StateGraph that orchestrates the four-stage
+    workflow: scope → (ask_clarification | research → synthesize)
+  - The router function for the conditional edge after scope
+  - run_agent(): the entry point the app calls to invoke the graph
 
-Tools live in tools.py. External data plumbing lives in osm_client.py.
+Nodes live in nodes.py. Tools live in tools.py. External data plumbing
+lives in osm_client.py.
 
-(Weekend 3 note: this module is about to grow into a LangGraph StateGraph
-with scope/research/synthesize nodes. The tool extraction was a preparatory
-cleanup so the graph refactor happens on a tidier starting file.)
+Weekend 3 note: the graph runs stateless in this sub-step. Memory
+(MemorySaver + thread-scoped state) is added in Step 3 of the plan.
 """
-
-from datetime import date
 
 from dotenv import load_dotenv
 
-from langchain_anthropic import ChatAnthropic
-from langgraph.prebuilt import create_react_agent
+from langgraph.graph import StateGraph, START, END
 
-from schemas import TripBrief
-from tools import get_weather, search_restaurants, search_attractions
+from schemas import TripState
+from nodes import (
+    scope_node,
+    ask_clarification_node,
+    research_node,
+    synthesize_node,
+)
 
 
-# ---------------------------------------------------------------
-# 1. LOAD ENVIRONMENT VARIABLES
-# ---------------------------------------------------------------
 load_dotenv()
 
 
-# ---------------------------------------------------------------
-# 2. INITIALIZE THE LLM
-# ---------------------------------------------------------------
-# temperature=0 gives deterministic outputs — same input → same output.
-# Good for tool-use agents where we want reliable routing decisions.
-llm = ChatAnthropic(
-    model="claude-sonnet-4-5-20250929",
-    temperature=0,
+# ──────────────────────────────────────────────────────────────────────
+# 1. ROUTER for the conditional edge after scope
+# ──────────────────────────────────────────────────────────────────────
+# LangGraph's add_conditional_edges() takes a function that inspects state
+# and returns the name of the next node to run. This is where the graph's
+# ONE piece of runtime logic lives — everything else is static wiring.
+def route_after_scope(state: TripState) -> str:
+    """Route to research if scope has enough info; otherwise ask user."""
+    if state["missing_fields"]:
+        return "ask_clarification"
+    return "research"
+
+
+# ──────────────────────────────────────────────────────────────────────
+# 2. BUILD AND COMPILE THE GRAPH
+# ──────────────────────────────────────────────────────────────────────
+# Same construction pattern every LangGraph app uses:
+#   1) Instantiate StateGraph with the state shape (TripState)
+#   2) Add each node function under a string name
+#   3) Add edges (static) and conditional edges (via router functions)
+#   4) Compile — this validates the graph and returns an executable
+_graph_builder = StateGraph(TripState)
+
+_graph_builder.add_node("scope", scope_node)
+_graph_builder.add_node("ask_clarification", ask_clarification_node)
+_graph_builder.add_node("research", research_node)
+_graph_builder.add_node("synthesize", synthesize_node)
+
+_graph_builder.add_edge(START, "scope")
+_graph_builder.add_conditional_edges(
+    "scope",
+    route_after_scope,
+    {
+        "ask_clarification": "ask_clarification",
+        "research": "research",
+    },
 )
+_graph_builder.add_edge("ask_clarification", END)
+_graph_builder.add_edge("research", "synthesize")
+_graph_builder.add_edge("synthesize", END)
+
+# Compile once at module load. `graph` is the executable object the app
+# invokes. In Step 3 of the plan, .compile() will get a checkpointer=MemorySaver()
+# argument to enable persistent state across turns.
+graph = _graph_builder.compile()
 
 
-# ---------------------------------------------------------------
-# 3. CREATE THE AGENT
-# ---------------------------------------------------------------
-# ReAct = Reasoning + Acting. The agent loops (think → tool → observe)
-# until it has enough to give a final answer.
-SYSTEM_PROMPT = (
-    "You are a helpful travel research assistant with access to three tools:\n"
-    "  - get_weather: for current weather in any city\n"
-    "  - search_restaurants: for dining recommendations in any city\n"
-    "  - search_attractions: for sightseeing, museums, and landmarks in any city\n"
-    "\n"
-    "When a user asks about a destination, use these tools to gather live data "
-    "rather than relying on your training knowledge. For trip planning questions "
-    "that touch multiple topics (weather AND food AND attractions), call all "
-    "relevant tools before answering. Always call get_weather when a destination "
-    "is mentioned, even for future trips — current conditions give useful context. "
-    "Keep final responses concise and practical."
-)
-
-agent = create_react_agent(
-    model=llm,
-    tools=[get_weather, search_restaurants, search_attractions],
-    prompt=SYSTEM_PROMPT,
-)
-
-
-# ---------------------------------------------------------------
-# 4. RUN FUNCTION (used by Streamlit and for direct testing)
-# ---------------------------------------------------------------
-def run_agent(user_query: str) -> str:
-    """Send a query to the agent and return the final text response."""
-    result = agent.invoke({"messages": [("human", user_query)]})
-    return result["messages"][-1].content
-
-
-# ---------------------------------------------------------------
-# 5. STRUCTURED OUTPUT VIA POST-PROCESSING
-# ---------------------------------------------------------------
-# Stage 2 of the two-stage pattern: take the agent's free-form prose
-# and convert it into a validated TripBrief object.
-def to_trip_brief(user_query: str, agent_response: str) -> TripBrief:
-    """Convert the agent's prose response into a structured TripBrief.
-
-    Args:
-        user_query: The original user question (has dates, destination)
-        agent_response: The agent's prose answer (has weather + place data)
+# ──────────────────────────────────────────────────────────────────────
+# 3. RUN FUNCTION (used by Streamlit and for direct testing)
+# ──────────────────────────────────────────────────────────────────────
+def run_agent(user_query: str) -> dict:
+    """Invoke the graph with a single user query; return final state fields.
 
     Returns:
-        A validated TripBrief object.
+        dict with keys:
+          - trip_brief: TripBrief | None (set if scope had enough info)
+          - reasoning: str | None (set if synthesize ran)
+          - clarifying_question: str | None (set if scope needed more info)
 
-    Raises:
-        pydantic.ValidationError: if the LLM's JSON doesn't match the schema.
+    In the current stateless implementation, each call gets a fresh state
+    with no prior conversation history. Memory (Step 3) will change this.
     """
-    structured_llm = llm.with_structured_output(TripBrief)
+    initial_state: TripState = {
+        "messages": [("human", user_query)],
+        "intent": None,
+        "missing_fields": [],
+        "clarifying_question": None,
+        "tool_results": {},
+        "tool_errors": [],
+        "trip_brief": None,
+        "reasoning": None,
+    }
 
-    formatting_prompt = f"""Convert the following travel research response into a structured trip brief.
+    final_state = graph.invoke(initial_state)
 
-Original user question:
-{user_query}
-
-Agent's research findings:
-{agent_response}
-
-Instructions:
-- Extract destination, start_date, and end_date from the user's question.
-- Use today's date as context if the user gave a year-less date like "Dec 15-17".
-- Summarize the weather findings into weather_summary.
-- Extract each restaurant and attraction as a Place with name, type, and address.
-- If the agent noted any data was unavailable, add that to notes.
-- If no restaurants or attractions were found, leave those lists empty.
-
-Today's date is {date.today().isoformat()}."""
-
-    return structured_llm.invoke(formatting_prompt)
+    return {
+        "trip_brief": final_state.get("trip_brief"),
+        "reasoning": final_state.get("reasoning"),
+        "clarifying_question": final_state.get("clarifying_question"),
+    }
 
 
-# ---------------------------------------------------------------
-# 6. QUICK TEST (only runs if you execute this file directly)
-# ---------------------------------------------------------------
+# ──────────────────────────────────────────────────────────────────────
+# 4. QUICK TEST (runs when this file is executed directly)
+# ──────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    print("Testing agent with structured output...\n")
+    print("=" * 60)
+    print("Test 1: Fully specified query (should route scope → research → synthesize)")
+    print("=" * 60)
+    result = run_agent(
+        "Plan a trip to Austin, TX from Dec 15 to Dec 17, 2026. "
+        "I'm into live music and BBQ."
+    )
+    print(f"\nclarifying_question: {result['clarifying_question']}")
+    if result["trip_brief"]:
+        print(f"\ntrip_brief (JSON):")
+        print(result["trip_brief"].model_dump_json(indent=2))
+        print(f"\nreasoning:\n{result['reasoning']}")
 
-    test_query = "Plan a trip to Austin, TX from Dec 15 to Dec 17, 2026. What's the weather, where should I eat, and what should I see?"
-    print(f"Query: {test_query}\n")
-
-    prose_response = run_agent(test_query)
-    print("── Prose response ──")
-    print(prose_response)
-
-    print("\n── Structured TripBrief ──")
-    trip_brief = to_trip_brief(test_query, prose_response)
-    print(trip_brief.model_dump_json(indent=2))
+    print("\n" + "=" * 60)
+    print("Test 2: Ambiguous query (should route scope → ask_clarification)")
+    print("=" * 60)
+    result = run_agent("I want to travel somewhere fun.")
+    print(f"\nclarifying_question: {result['clarifying_question']}")
+    print(f"trip_brief: {result['trip_brief']}")
+    print(f"reasoning: {result['reasoning']}")
