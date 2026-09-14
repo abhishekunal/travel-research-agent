@@ -17,6 +17,7 @@ Weekend 3 note: the graph runs stateless in this sub-step. Memory
 from dotenv import load_dotenv
 
 from langgraph.graph import StateGraph, START, END
+from langgraph.checkpoint.memory import MemorySaver
 
 from schemas import TripState
 from nodes import (
@@ -74,36 +75,53 @@ _graph_builder.add_edge("synthesize", END)
 # Compile once at module load. `graph` is the executable object the app
 # invokes. In Step 3 of the plan, .compile() will get a checkpointer=MemorySaver()
 # argument to enable persistent state across turns.
-graph = _graph_builder.compile()
+# Compile with a MemorySaver checkpointer so state persists between
+# invocations of the same thread_id. This is what enables multi-turn
+# conversations: each turn is a separate graph.invoke() call, but they
+# share state because they share thread_id.
+#
+# In-memory storage means state is lost when the Python process ends
+# (Streamlit Cloud sleeping the container, local restart, etc.). That's
+# an accepted tradeoff for this deployment — see WEEKEND_3_PLAN.md.
+_checkpointer = MemorySaver()
+graph = _graph_builder.compile(checkpointer=_checkpointer)
 
 
 # ──────────────────────────────────────────────────────────────────────
 # 3. RUN FUNCTION (used by Streamlit and for direct testing)
 # ──────────────────────────────────────────────────────────────────────
-def run_agent(user_query: str) -> dict:
-    """Invoke the graph with a single user query; return final state fields.
+def run_agent(user_query: str, thread_id: str) -> dict:
+    """Invoke the graph with a user query on a given conversation thread.
+
+    Args:
+        user_query: The latest user message.
+        thread_id: An opaque identifier that groups turns into a conversation.
+            Callers (Streamlit, tests, etc.) issue this. Same thread_id
+            across calls = same conversation, state persists. Different
+            thread_id = fresh conversation.
 
     Returns:
         dict with keys:
-          - trip_brief: TripBrief | None (set if scope had enough info)
-          - reasoning: str | None (set if synthesize ran)
+          - trip_brief: TripBrief | None (set if synthesize ran this turn)
+          - reasoning: str | None (set if synthesize ran this turn)
           - clarifying_question: str | None (set if scope needed more info)
 
-    In the current stateless implementation, each call gets a fresh state
-    with no prior conversation history. Memory (Step 3) will change this.
+    Note: on turns after the first, most of the state fields we pass here
+    are effectively overrides — but the checkpointer will merge them with
+    whatever state was saved for this thread_id at the end of the last turn.
+    We only pass the fields we want to *update* this turn (the new message);
+    everything else is reloaded from the checkpoint.
     """
-    initial_state: TripState = {
-        "messages": [("human", user_query)],
-        "intent": None,
-        "missing_fields": [],
-        "clarifying_question": None,
-        "tool_results": {},
-        "tool_errors": [],
-        "trip_brief": None,
-        "reasoning": None,
-    }
+    config = {"configurable": {"thread_id": thread_id}}
 
-    final_state = graph.invoke(initial_state)
+    # On the first turn, thread has no saved state — the checkpointer
+    # treats the input as the starting state. On subsequent turns, the
+    # checkpointer merges this input with the prior saved state (the
+    # add_messages reducer appends our new human message to the existing
+    # conversation history).
+    turn_input = {"messages": [("human", user_query)]}
+
+    final_state = graph.invoke(turn_input, config=config)
 
     return {
         "trip_brief": final_state.get("trip_brief"),
@@ -116,23 +134,65 @@ def run_agent(user_query: str) -> dict:
 # 4. QUICK TEST (runs when this file is executed directly)
 # ──────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
+    import uuid
+
+    # ── Test 1: single-turn queries with fresh threads ──
     print("=" * 60)
-    print("Test 1: Fully specified query (should route scope → research → synthesize)")
+    print("Test 1: Complete query, fresh thread")
     print("=" * 60)
+    thread_a = str(uuid.uuid4())
     result = run_agent(
         "Plan a trip to Austin, TX from Dec 15 to Dec 17, 2026. "
-        "I'm into live music and BBQ."
+        "I'm into live music and BBQ.",
+        thread_id=thread_a,
     )
-    print(f"\nclarifying_question: {result['clarifying_question']}")
+    print(f"clarifying_question: {result['clarifying_question']}")
     if result["trip_brief"]:
-        print(f"\ntrip_brief (JSON):")
-        print(result["trip_brief"].model_dump_json(indent=2))
-        print(f"\nreasoning:\n{result['reasoning']}")
+        print(f"destination: {result['trip_brief'].destination}")
+        print(f"reasoning (first 200 chars): {result['reasoning'][:200]}...")
 
     print("\n" + "=" * 60)
-    print("Test 2: Ambiguous query (should route scope → ask_clarification)")
+    print("Test 2: Ambiguous query, fresh thread — should ask for info")
     print("=" * 60)
-    result = run_agent("I want to travel somewhere fun.")
-    print(f"\nclarifying_question: {result['clarifying_question']}")
+    thread_b = str(uuid.uuid4())
+    result = run_agent("I want to travel somewhere fun.", thread_id=thread_b)
+    print(f"clarifying_question: {result['clarifying_question']}")
     print(f"trip_brief: {result['trip_brief']}")
-    print(f"reasoning: {result['reasoning']}")
+
+    # ── Test 3: multi-turn conversation on ONE thread ──
+    # This is the crux — turn 2 must see turn 1's context via checkpointer.
+    print("\n" + "=" * 60)
+    print("Test 3: Multi-turn on one thread (memory recall)")
+    print("=" * 60)
+    thread_c = str(uuid.uuid4())
+
+    print("\n--- Turn 1: ambiguous, should ask a question ---")
+    r1 = run_agent("Plan a trip to Barcelona.", thread_id=thread_c)
+    print(f"clarifying_question: {r1['clarifying_question']}")
+    print(f"trip_brief: {r1['trip_brief']}")
+
+    print("\n--- Turn 2: answer the question, same thread ---")
+    r2 = run_agent(
+        "I'm going Dec 20 to Dec 23, 2026. Love architecture.",
+        thread_id=thread_c,
+    )
+    print(f"clarifying_question: {r2['clarifying_question']}")
+    if r2["trip_brief"]:
+        print(f"destination: {r2['trip_brief'].destination}")
+        print(f"start_date: {r2['trip_brief'].start_date}")
+        print(f"end_date: {r2['trip_brief'].end_date}")
+        print(f"reasoning (first 200 chars): {r2['reasoning'][:200]}...")
+
+    # ── Test 4: thread isolation ──
+    # Two threads running the same query should be independent — thread D
+    # should NOT see thread_c's Barcelona context.
+    print("\n" + "=" * 60)
+    print("Test 4: Thread isolation")
+    print("=" * 60)
+    thread_d = str(uuid.uuid4())
+    print(f"\n--- New thread, asking a follow-up-shaped question ---")
+    r_iso = run_agent(
+        "What's the weather like there?", thread_id=thread_d
+    )
+    print(f"clarifying_question: {r_iso['clarifying_question']}")
+    print("(Should ask WHERE — should NOT assume Barcelona from thread_c)")
