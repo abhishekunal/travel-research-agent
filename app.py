@@ -129,12 +129,49 @@ for msg in st.session_state.messages:
 
 
 # ---------------------------------------------------------------
+# 4b. EMPTY-STATE PROMPT GALLERY
+# ---------------------------------------------------------------
+# When the conversation is empty, show clickable examples so users
+# don't face a cold blank screen. Once they've interacted at all,
+# this section renders nothing — the gallery is first-impression only.
+#
+# Clicking an example writes it to session_state.pending_input; the
+# input-handling block below reads either pending_input OR the live
+# chat input, whichever is present this run.
+EXAMPLE_PROMPTS = [
+    "Plan a trip to Austin, TX from Dec 15 to Dec 17, 2026. I'm into live music and BBQ.",
+    "I want to spend a long weekend in Lisbon in early October — love food and architecture.",
+    "Plan a 3-day trip to Kyoto next spring, focused on temples and quiet gardens.",
+    "Help me plan a weekend in Chicago — I like museums and deep-dish pizza.",
+]
+
+if not st.session_state.messages:
+    st.markdown("**Try one of these to get started:**")
+    # Two columns × two rows layout; keeps buttons readable, doesn't
+    # sprawl on wider screens.
+    col1, col2 = st.columns(2)
+    for i, example in enumerate(EXAMPLE_PROMPTS):
+        target_col = col1 if i % 2 == 0 else col2
+        with target_col:
+            # use_container_width makes buttons the same size in each column
+            if st.button(example, key=f"example_{i}", use_container_width=True):
+                st.session_state.pending_input = example
+                st.rerun()
+
+
+# ---------------------------------------------------------------
 # 5. HANDLE THE USER'S NEW INPUT
 # ---------------------------------------------------------------
 # st.chat_input renders the text box pinned to the bottom of the page.
 # It returns whatever the user typed on this re-run, or None if they
 # haven't typed anything since the last re-run.
 user_input = st.chat_input("Ask me about a trip...")
+
+# The user's input this run comes from EITHER the chat input box OR
+# a click on an empty-state example. Whichever is present, use it.
+if not user_input and st.session_state.get("pending_input"):
+    user_input = st.session_state.pending_input
+    st.session_state.pending_input = None  # consume so it doesn't re-fire
 
 if user_input:
     # Step A: Add the user's message to history and render it immediately
@@ -158,9 +195,24 @@ if user_input:
                     thread_id=st.session_state.thread_id,
                 )
             except Exception as e:
-                # Fail visibly but don't crash the whole app. The user
-                # can retry with a different message.
-                st.error(f"Something went wrong: {e}")
+                # Fail visibly but don't crash the whole app. Wrap the
+                # error in a friendlier explanation with next steps —
+                # a raw exception makes the app feel broken; a scoped
+                # error card makes it feel intentional and recoverable
+                
+                st.error(
+                    "**Something went wrong on this turn.**  \n\n"
+                    "This is usually a temporary issue with one of the "
+                    "external services (weather, places data, or the "
+                    "language model). You can:\n\n"
+                    "- Try rephrasing your question\n"
+                    "- Try again in a moment\n"
+                    "- Click **Reset conversation** in the sidebar and start over"
+                )
+                # Keep the technical detail visible but out of the way,
+                # so we can debug without cluttering the main UI.
+                with st.expander("Technical details"):
+                    st.code(f"{type(e).__name__}: {e}")
                 st.stop()
 
         # Step C: The agent's response can be one of two shapes:
@@ -209,6 +261,10 @@ with st.sidebar:
         "A conversational agent built with LangGraph, Claude Sonnet 4.5, "
         "OpenStreetMap, and OpenWeatherMap. Ask about a destination, "
         "answer any follow-up questions, and get a structured trip brief."
+    )
+
+    st.markdown(
+        "[View on GitHub](https://github.com/abhishekunal/travel-research-agent)"
     )
 
     st.markdown("---")
