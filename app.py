@@ -53,6 +53,15 @@ if "messages" not in st.session_state:
     # the chat bubbles read from.
     st.session_state.messages = []
 
+if "query_count" not in st.session_state:
+    st.session_state.query_count = 0
+
+# The soft ceiling for per-session queries. Not a hard rate limit —
+# just a signal for accidental over-use. Browser refresh bypasses it.
+# Real cost backstop is the $20/mo Anthropic spending cap set in
+# the platform dashboard.
+MAX_QUERIES_PER_SESSION = 10
+
 
 # ---------------------------------------------------------------
 # 3. HEADER
@@ -174,6 +183,22 @@ if not user_input and st.session_state.get("pending_input"):
     st.session_state.pending_input = None  # consume so it doesn't re-fire
 
 if user_input:
+    # Step 0: Cost guardrail. If this session has already hit the soft
+    # limit, decline gracefully and tell the user how to continue.
+    # We still render their attempted message so they see it wasn't
+    # dropped silently.
+    if st.session_state.query_count >= MAX_QUERIES_PER_SESSION:
+        with st.chat_message("user"):
+            st.markdown(user_input)
+        with st.chat_message("assistant"):
+            st.info(
+                f"**You've hit the {MAX_QUERIES_PER_SESSION}-query limit for this session.**  \n\n"
+                "This app is a portfolio project with API costs I'm covering personally, "
+                "so I cap queries per browser session to keep things sustainable. "
+                "**Refresh the page** to start a new session and keep exploring."
+            )
+        st.stop()
+
     # Step A: Add the user's message to history and render it immediately
     # so they see it appear before we start the (slow) agent call.
     st.session_state.messages.append({
@@ -215,6 +240,9 @@ if user_input:
                     st.code(f"{type(e).__name__}: {e}")
                 st.stop()
 
+        # Successful agent invocation — count it against the session budget.
+        # This happens after the try/except, so failed calls don't count.
+        st.session_state.query_count += 1
         # Step C: The agent's response can be one of two shapes:
         #   (a) A clarifying question — scope needed more info
         #   (b) A completed brief — scope had enough, synthesize ran
@@ -265,6 +293,9 @@ with st.sidebar:
 
     st.markdown(
         "[View on GitHub](https://github.com/abhishekunal/travel-research-agent)"
+    )
+    st.caption(
+        f"Queries this session: {st.session_state.query_count} / {MAX_QUERIES_PER_SESSION}"
     )
 
     st.markdown("---")
