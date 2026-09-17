@@ -1,6 +1,6 @@
 # Weekend 3 Plan — Prompt Chaining + Memory + Quiet Deployment
 
-**Status:** Planned
+**Status:** In progress — Steps 1–5 complete, Steps 6–8 remaining
 **Estimated time:** 16–22 hours
 **Prerequisite:** Weekend 2 complete (multi-tool orchestration + structured output shipped) ✅
 
@@ -140,38 +140,54 @@ Deferring beyond Weekend 4:
 | Debugging + iteration | 2–3 hrs |
 | **Total** | **17–23 hrs** |
 
-**Scope-cut plan if I run over:**
-1. First cut: UI polish (defer to Weekend 4 alongside the README overhaul)
-2. Second cut: Prompt chaining synthesis stage (keep scope + research stages, drop dedicated synthesis — reuse Weekend 2's structured output pattern)
-3. Third cut (last resort): Memory (defer to Weekend 4, but this hurts because deployment without memory is a demo weakness)
+## Scope-cut plan — none triggered
 
-Prompt chaining is the highest-value item and should be protected — it's the biggest architectural leap of the whole project.
+The plan protected prompt chaining as the highest-value item, and it shipped clean. Memory shipped. UI polish shipped (with tool-call transparency and JSON export deliberately skipped as low-value/high-effort). No cuts were needed.
 
 ---
 
-## Open questions to resolve before starting
+## Open questions — resolved during Step 1
 
-- [ ] Does the prompt chaining refactor use LangGraph's graph builder, or is it simpler to just chain LLM calls manually in Python?
-- [ ] For memory, does `MemorySaver` (in-memory) work for the deployed app, or do I need `SqliteSaver` for persistence across app restarts?
-- [ ] How do I test the deployed app end-to-end without exposing the URL publicly? (Answer likely: just share with 1–2 trusted people)
-- [ ] What happens to conversation memory when Streamlit Cloud puts the app to sleep after inactivity?
+- **LangGraph graph builder vs. manual chaining?** → `StateGraph`, chosen because MemorySaver integrates natively and conditional edges are first-class primitives for scope's clarifying-question routing.
+- **`MemorySaver` vs. `SqliteSaver`?** → `MemorySaver`. Streamlit Cloud has an ephemeral filesystem, so `SqliteSaver` doesn't buy real persistence there. Documented tradeoff: memory lost when the container sleeps.
+- **Testing deployment without public URL?** → Deploy as public but share with 2–3 trusted people. Streamlit Cloud URLs have no discovery mechanism; a URL not shared isn't findable.
+- **App sleep memory behavior?** → Memory is lost on sleep. Accepted; document in README. Weekend 5+ backlog: detect sleep on wake and show "Previous context cleared due to inactivity" banner.
 
 ---
 
 ## Definition of done
 
-- [ ] Agent refactored into scope → research → synthesize stages
-- [ ] Multi-turn conversations work with verifiable memory recall
+- [x] Agent refactored into scope → research → synthesize stages
+- [x] Multi-turn conversations work with verifiable memory recall
 - [ ] Live URL exists on Streamlit Cloud (not yet publicized)
-- [ ] Spending caps configured on Anthropic + OpenWeatherMap dashboards
-- [ ] Session-level query counter in place
-- [ ] UI has empty state, tool transparency, and friendly error rendering
+- [x] Spending caps configured on Anthropic + OpenWeatherMap dashboards
+- [x] Session-level query counter in place
+- [x] UI has empty state, tool transparency, and friendly error rendering (tool-call transparency deferred to Weekend 4+)
 - [ ] README updated with live URL and new architecture
-- [ ] All work committed and pushed to GitHub
-- [ ] Weekend 3 build log added to notes (debugging lessons, decisions, vocabulary)
+- [ ] All work committed and pushed to GitHub - Steps 1–5 pushed; Steps 6–7 remaining
+- [x] Weekend 3 build log added to notes (debugging lessons, decisions, vocabulary)
 - [ ] Personal validation: I can send the URL to a friend and they can plan a trip without confusion
 
 ---
+
+## Real-world learnings surfaced during the build
+
+Things that only became visible from actually building and testing:
+
+- **Pre-existing OWM bug found during refactor testing.** OpenWeatherMap's `q` parameter accepts `City` or `City,CountryCode` but 404s on `City,StateCode`. Skip-and-note masked this since Weekend 1. Fixed by stripping everything after the first comma. A reminder that graceful degradation can hide real bugs — diagnostic runs matter.
+
+- **Deprecated `create_react_agent` kept intentionally.** The recommended replacement (`langchain.agents.create_agent`) has a broken transitive dependency in the current package set. Documented the choice in code with a NOTE comment. Revisit when the ecosystem stabilizes.
+
+- **Intent router gap identified from real use.** After Step 5, testing surfaced that follow-up questions about an existing brief ("what about Beverly Hills?") re-run the full pipeline instead of narrowing scope. This is "Fork B" from Weekend 2 notes, now with a concrete symptom. Weekend 5+ backlog.
+
+- **OSM data quality varies by city.** Chicago tests returned rich results (real museums, real restaurants with addresses). Dallas and Tokyo tests returned patchy results. This is an OSM data completeness issue, not an agent issue. Weekend 5+ backlog: migrate to Google Places or Foursquare (paid).
+
+- **Weather is current-only.** OWM's free `/weather` endpoint returns current conditions, not forecasts. Synthesize node discloses this honestly ("current, not December forecast"). Weekend 5+ backlog: `/onecall` (paid) or alternative API.
+
+- **msgpack serialization warning logged.** Future LangGraph will require explicit type registration for custom Pydantic types in checkpointer state. Working today with a deprecation warning; Weekend 5+ backlog.
+
+---
+
 
 ## Note on the "quiet launch" strategy
 
