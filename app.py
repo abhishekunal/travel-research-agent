@@ -9,10 +9,40 @@ Run with:
     streamlit run app.py
 """
 
+
+import os
 import uuid
 from datetime import timedelta
 
 import streamlit as st
+
+# ---------------------------------------------------------------
+# 0. SECRETS SHIM — must run before importing agent
+# ---------------------------------------------------------------
+# Locally, keys come from .env via python-dotenv (loaded inside agent.py).
+# On Streamlit Cloud, there is no .env — keys live in st.secrets, a
+# dict-like object populated from the dashboard's secrets manager.
+#
+# This shim copies any st.secrets entries into os.environ so the
+# existing os.getenv(...) calls in agent.py, tools.py, etc. work
+# unchanged in both environments. Locally, st.secrets is empty (or
+# raises on access) and this is a no-op; deployed, it fills in the
+# keys .env would have provided.
+#
+# ORDERING: this must run before `from agent import run_agent` below,
+# because agent.py initializes LangChain clients at import time and
+# those clients read env vars immediately.
+try:
+    for key, value in st.secrets.items():
+        # Don't clobber env vars that are already set — local dev with
+        # a real .env should still win over any accidental secrets.toml.
+        if key not in os.environ:
+            os.environ[key] = str(value)
+except (FileNotFoundError, st.errors.StreamlitSecretNotFoundError):
+    # No secrets.toml locally and no Cloud secrets configured — fine,
+    # .env will handle it when agent.py imports.
+    pass
+
 
 from agent import run_agent
 
