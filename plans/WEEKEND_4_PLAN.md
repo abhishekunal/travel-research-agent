@@ -8,79 +8,56 @@
 
 ## Goal
 
-Add retrieval-augmented generation (RAG) grounded in a curated travel knowledge base, build a lightweight evaluation suite to prove the agent works reliably, and launch the project publicly on LinkedIn with a working URL.
+"Fix the two visible product gaps surfaced during Weekend 3's quiet-launch testing (intent routing, places data quality), add a scoped RAG pipeline grounded in a curated travel knowledge base, and launch the project publicly on LinkedIn with a working URL."
 
-**Framing:** Weekend 4 is the "launch" weekend. Every task ladders up to a public post that positions this project as a serious portfolio piece — not just working, but *provably* working via evals, and *distinctively* designed via RAG + prompt chaining.
+"Framing: Weekend 4 is the 'launch-ready' weekend. Weekend 3's hosted smoke test revealed that follow-up questions re-run the full pipeline (intent router gap) and that even best-case cities like Chicago return thin OSM results (data quality gap). Both are demo-killers for a public launch. This weekend closes those two gaps, adds RAG as the differentiating architectural piece, and ships publicly. Evals are deliberately deferred to Weekend 5+ — a launch that works and looks credible is worth more than a launch with evals but visible bugs."
 
 ---
 
 ## Scope
 
-### 1. RAG pipeline over curated travel knowledge base
+### 1. Intent router node (protected — first to build, last to cut)
 
-- **Corpus curation** (10–15 destinations)
-  - Source: Wikivoyage articles (Creative Commons-licensed, travel-focused)
-  - Mix: popular destinations (Tokyo, Paris, Barcelona, Rome, NYC) + a few interesting ones (Marrakech, Lisbon, Chiang Mai)
-  - Store as markdown files in a `corpus/` directory in the repo
-  - Clean the content: remove nav junk, focus on cultural context, neighborhood guides, safety, best time to visit
+Add classifier node at top of graph: new-trip / refinement / brief-question / other
+Add brief_qa_node that answers follow-up questions from existing state without re-invoking research tools
+Update route_after_scope logic (or add a new router before scope)
+Test all four intent paths through the hosted app
+Why this is protected: Weekend 3 testing confirmed this is what users notice first. A working app is worth more than a sophisticated broken one.
 
-- **Vector database + embedding pipeline**
-  - Use **Chroma** (local, embedded, no cloud setup — ideal for portfolio project that deploys)
-  - Use **OpenAI's `text-embedding-3-small`** for embeddings (cheap, high quality, well-documented)
-  - Alternative: Voyage AI embeddings if I want to stay closer to the Anthropic ecosystem
-  - Build a one-time indexing script: chunk corpus → embed → persist to Chroma
-  - Persist the vector DB in the repo so it deploys with the app (no external DB dependency)
+### 2. Places API migration (depends on cost research — see open questions)
 
-- **New retrieval tool**
-  - Add `search_travel_knowledge` tool alongside existing tools
-  - Update system prompt so the agent knows *when* to use RAG (cultural questions, neighborhood advice, "what's it like") vs. structured APIs (weather, current restaurants)
-  - Handle edge cases: destination not in corpus, retrieval returns nothing relevant, low similarity scores
+Verify current pricing on Google Places and Foursquare before starting
+Set hard billing cap ($30 ceiling, verify automated shutdown works)
+New places_client.py replacing OSM plumbing
+Update search_restaurants and search_attractions — keep return shape identical so downstream stays untouched
+If cost research shows neither provider fits the $30 budget: stay on OSM, document the limitation more prominently in the README
+Why this matters: OSM's Chicago pizza gap is real and visible on the public URL right now.
 
-**Why this matters:** RAG is the most common enterprise AI pattern right now. Demonstrating you've built one end-to-end — with a real corpus, real chunking decisions, real retrieval tuning — is portfolio-critical for anyone hiring for applied AI roles.
+### 3. RAG pipeline (scope-reduced from original plan)
 
-### 2. Evaluation suite with DeepEval
+Original scope was too ambitious for Weekend 4's expanded workload. Reduce to 5–8 destinations (was 10–15), targeting cities where you can vouch for the content quality personally.
+Wikivoyage source (Creative Commons), stored as markdown in corpus/
+Chroma (local, embedded) + OpenAI text-embedding-3-small
+One-time indexing script; persist the vector DB in the repo
+New search_travel_knowledge tool alongside existing tools
+Update scope prompt so the agent knows when to reach for RAG vs. structured APIs
+What "scope-reduced" means: get the architecture into your portfolio (embeddings, chunking, retrieval), not a comprehensive corpus. The pattern is what matters for the AI PM story.
 
-- Install DeepEval and integrate with the agent
-- Build a test dataset of 15–20 representative queries covering:
-  - **Tool routing accuracy** — does the right tool get called for the right query?
-  - **Structured output validity** — does the output conform to the `TripBrief` schema?
-  - **Guardrail behavior** — do invalid inputs get rejected gracefully?
-  - **RAG grounding** — does the agent use retrieval when it should, and cite the corpus?
-  - **Multi-turn memory** — does the agent recall context from prior turns?
-- Use **LLM-as-judge** patterns for open-ended quality checks (does the trip brief actually make sense?)
-- Produce a simple pass/fail report + latency + cost per query metrics
-- Save results to a `evals/results/` directory as JSON or markdown for the README
+### 4. Full README overhaul + LinkedIn launch
 
-**Why this matters:** Evals are one of the highest-signal portfolio items in applied AI. Most hobby projects skip them entirely. Having even a basic eval harness signals you understand what production AI actually requires — not just that it runs, but that it works reliably and you can measure regressions.
+Live URL prominence, demo GIF or short screen recording, 2–3 static screenshots
+Updated architecture diagram reflecting intent router + RAG + memory
+Honest "known limitations" section — Weekend 5+ backlog items become visible portfolio strength
+Lessons learned section covering the PM-to-engineer journey
+LinkedIn post drafted, edited, posted on a weekday morning
+Post-launch monitoring plan documented — API cost check, comment responsiveness
 
-### 3. Full README overhaul for public launch
+### 5. Final polish + friend testing
 
-- **"Try it live" section at top** with prominent URL + one-line hook
-- **Demo GIF or screen recording** — record a 30–60s walkthrough showing a full trip planning flow
-- **Screenshots** — 2–3 static shots of the app in action
-- **Updated architecture diagram** — reflect prompt chaining stages, memory, RAG, all tools
-- **Eval results section** — show the pass rate, key metrics, honest discussion of weaknesses
-- **Lessons learned section** — capture the PM-to-engineer journey, biggest surprises, what you'd do differently
-- **What's next section** — foreshadow MCP integration as Weekend 5+ direction
+Send URL to 2–3 friends before public launch
+Fix anything embarrassing that surfaces
+Verify all cost caps are still holding after places API migration
 
-**Why this matters:** The README is the first thing a recruiter, hiring manager, or curious LinkedIn scroller will see when they click through from your post. It has to convince someone in 30 seconds that this project is worth their time. Screenshots and a demo GIF do 80% of that work.
-
-### 4. Public LinkedIn launch post
-
-- Draft a post that tells the full 4-weekend story: what you built, why, what you learned, what's next
-- Include the live URL, GitHub link, screenshots/demo GIF
-- Frame it as: *"I'm a PM in fintech who wanted to learn agentic AI hands-on. Over 4 weekends I built a travel research agent with multi-tool orchestration, structured output, memory, and RAG — and shipped it live. Here's what I learned and where I want to go next."*
-- End with an invite to try the app + a hook about what's next (MCP, evals expansion, etc.)
-- Post on a weekday morning for maximum engagement
-
-**Why this matters:** This is the whole point of the project as a portfolio piece. If you don't post, the work exists in a vacuum. If you post well, it opens conversations, doors, and future opportunities.
-
-### 5. Final polish + edge case fixes
-
-- Test the live app extensively — send the URL to 2–3 friends before public post
-- Fix anything embarrassing that shows up
-- Verify cost caps are still holding
-- Make sure the eval results are honest, not cherry-picked
 
 ---
 
@@ -133,28 +110,29 @@ Deliberately deferring to Weekend 5+ (if continuing):
 - Additional destinations beyond the initial 10–15 in the corpus
 - Multi-language support
 
+Deferred from Weekend 4: Evaluation suite (DeepEval). Originally planned for this weekend. Deferred to Weekend 5+ so this weekend can fit the intent router and places API work required for a credible public launch. Rationale: a portfolio project that ships with intent routing and thin data quality (OSM) reads worse than one that ships with intent routing, better data, and no evals yet. Evals are highest-value when there's something worth measuring; they belong to the "how do we know it works reliably?" question, which is a Weekend 5+ discipline layer. Naming this cut explicitly rather than silently pretending it wasn't planned.
+
 ---
 
 ## Sequencing (rough time budget)
 
-| Step | Estimated time |
-|---|---|
-| Corpus curation (research + clean 10–15 destinations) | 2–3 hrs |
-| Chunking + embedding + Chroma indexing script | 2–3 hrs |
-| RAG retrieval tool + integration with agent | 3–4 hrs |
-| Test RAG end-to-end + tune retrieval quality | 2 hrs |
-| DeepEval setup + test dataset design | 2–3 hrs |
-| Run evals + iterate on failures | 2–3 hrs |
-| Redeploy to Streamlit Cloud + verify RAG works in production | 1–2 hrs |
-| README overhaul + demo GIF + screenshots | 3–4 hrs |
-| LinkedIn post drafting + editing | 1–2 hrs |
-| Friend testing + final polish | 1–2 hrs |
-| **Total** | **19–28 hrs** |
+Step	Estimated time
+Intent router node (scope, code, test)	3–4 hrs
+Places API cost research (verify Google/Foursquare pricing, set billing cap)	1 hr
+Places API migration (assuming go/no-go decision made)	2–3 hrs
+RAG corpus curation (5–8 destinations)	1–2 hrs
+RAG indexing + retrieval tool + agent integration	3–4 hrs
+RAG end-to-end test + tuning	1–2 hrs
+Redeploy to Streamlit Cloud + verify hosted	1–2 hrs
+README overhaul + demo GIF + screenshots	3–4 hrs
+LinkedIn post drafting + editing	1–2 hrs
+Friend testing + final polish	1–2 hrs
+Total	17–26 hrs
 
 **Scope-cut plan if I run over:**
-1. First cut: eval suite depth (ship with 8–10 tests instead of 15–20; note in README that this is v1 eval coverage)
-2. Second cut: corpus size (ship with 5–8 destinations instead of 10–15; add more post-launch)
-3. Third cut (last resort): demo GIF (screenshots only for launch, add GIF later)
+First cut: RAG corpus size (ship with 3–5 destinations instead of 5–8)
+Second cut: Places API migration deferred to post-launch if cost research is inconclusive; stay on OSM with better README framing
+Third cut: Demo GIF (screenshots only for launch, add GIF later)
 
 **Protect at all costs:** RAG working end-to-end, live URL functional, LinkedIn post shipped. Everything else is polish.
 
@@ -162,27 +140,26 @@ Deliberately deferring to Weekend 5+ (if continuing):
 
 ## Open questions to resolve before starting
 
-- [ ] Wikivoyage API vs. manual download vs. hand-curated markdown — which is fastest for getting a clean corpus?
-- [ ] OpenAI embeddings vs. Voyage AI — cost/quality tradeoff for this use case?
-- [ ] Chunking strategy: fixed size vs. semantic chunking vs. structure-aware (by markdown headers)?
-- [ ] Does DeepEval work well with LangGraph-based agents, or do I need to wrap the agent for testing?
-- [ ] How do I handle the eval scoring for open-ended outputs (LLM-as-judge) — which model do I use as judge?
-- [ ] For the LinkedIn post: single post vs. carousel/thread format?
+Google Places vs. Foursquare pricing — which fits the $30/month ceiling with real cost caps? Verify at source before Weekend 4 begins.
+ Wikivoyage API vs. manual download vs. hand-curated markdown — fastest path to a clean corpus?
+ OpenAI embeddings vs. Voyage AI — cost/quality tradeoff for this use case?
+ Chunking strategy: fixed size vs. semantic vs. structure-aware (by markdown headers)?
+ For the LinkedIn post: single post vs. carousel/thread format?
 
 ---
 
 ## Definition of done
 
-- [ ] RAG pipeline works end-to-end with a curated corpus of 10+ destinations
-- [ ] Vector database persists correctly in deployed environment
-- [ ] Agent routes intelligently between structured APIs and RAG
-- [ ] Eval suite runs and produces documented results
-- [ ] README fully overhauled with live URL, screenshots, demo GIF, eval results
-- [ ] Live app tested by at least 2 people other than me
-- [ ] LinkedIn post published with live URL, GitHub link, and story
-- [ ] All work committed and pushed to GitHub
-- [ ] Weekend 4 build log added to notes (debugging lessons, decisions, vocabulary)
-- [ ] Personal validation: I can point to specific queries where RAG demonstrably improves the answer
+Intent router node classifies turns and routes to appropriate downstream node
+ Follow-up questions about existing brief return scoped prose answers, not full TripBrief re-runs
+ Places API decision made (migrated OR OSM retained with documented limitation)
+ RAG pipeline works end-to-end with 5+ destinations
+ Vector database persists correctly in deployed environment
+ Agent routes intelligently between structured APIs and RAG
+ README fully overhauled with live URL, screenshots, demo GIF, honest limitations
+ Live app tested by at least 2 people other than me
+ All work committed and pushed to GitHub
+ Weekend 4 build log added to notes
 
 ---
 
