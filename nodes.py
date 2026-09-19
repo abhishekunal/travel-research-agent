@@ -32,7 +32,7 @@ from dotenv import load_dotenv
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import AIMessage
 
-from schemas import Intent, RouterDecision, ScopeResult, TripState
+from schemas import BriefQAResult, Intent, RouterDecision, ScopeResult, TripState
 
 
 load_dotenv()
@@ -354,6 +354,130 @@ def synthesize_node(state: TripState) -> dict:
         "trip_brief": result.trip_brief,
         "reasoning": result.reasoning,
     }
+
+# ──────────────────────────────────────────────────────────────────────
+# Node 5: BRIEF_QA  (Weekend 4)
+# ──────────────────────────────────────────────────────────────────────
+BRIEF_QA_PROMPT = """You are the FOLLOW-UP stage of a travel research \
+agent. The user has already received a completed trip brief. They're now \
+asking a scoped question about that brief.
+
+Your job is to answer their question using ONLY:
+  - The existing trip brief (below)
+  - The conversation history (below, as context)
+
+You do NOT have access to tools. You cannot look up new restaurants, \
+new attractions, current weather, or anything not already in the brief \
+or the conversation.
+
+STRICT SOURCING RULE — this is non-negotiable:
+- Do NOT name any specific restaurant, attraction, museum, neighborhood, \
+venue, hotel, park, street, or business that is not already present in \
+the trip brief or the prior conversation. Not as a recommendation, not \
+as an example, not as a "you might also try", not even to illustrate \
+what a re-plan would find.
+- General geographic terms are fine (e.g. "downtown", "the north side", \
+"the lakefront") ONLY if they appear in the brief or the user's own \
+messages. Do not introduce them yourself.
+- If the user's question requires naming something that isn't in the \
+brief, do not name it. Instead, say plainly that the current brief \
+doesn't cover it, and offer to re-plan if they'd like to see more \
+options. That IS the correct answer to those questions.
+- This rule holds even when you are confident the name exists in the \
+real world. Your role here is not to add knowledge; it is to answer \
+from the brief. Any name you introduce is fabrication from the user's \
+perspective, because the tools didn't verify it for this trip.
+
+Answer style:
+- Direct and conversational. This is a chat message, not a document.
+- Use only 2-4 sentences unless the user asked for more detail.
+- No card stack, no bullet lists unless the user asked for a list.
+- Refer back to specific items in the brief by name when relevant.
+- If the answer is a "no" or "I don't know", say so cleanly. Do not \
+pad with false confidence or invented examples.
+
+Set `answerable_from_state`:
+- True if you answered the user's question from the brief/conversation.
+- False if you had to say "I don't have that" or offer to re-plan.
+
+EXISTING TRIP BRIEF:
+{brief_summary}
+"""
+
+
+def _format_brief_for_qa(brief) -> str:
+    """Render a TripBrief as a compact plain-text summary for the QA prompt."""
+    lines = [
+        f"Destination: {brief.destination}",
+        f"Dates: {brief.start_date} to {brief.end_date}",
+        f"Weather: {brief.weather_summary}",
+    ]
+    if brief.restaurants:
+        lines.append("Restaurants:")
+        for r in brief.restaurants:
+            lines.append(f"  - {r.name} ({r.type}) — {r.address}")
+    if brief.attractions:
+        lines.append("Attractions:")
+        for a in brief.attractions:
+            lines.append(f"  - {a.name} ({a.type}) — {a.address}")
+    if brief.notes:
+        lines.append("Notes:")
+        for note in brief.notes:
+            lines.append(f"  - {note}")
+    return "\n".join(lines)
+
+
+def brief_qa_node(state: TripState) -> dict:
+    """Answer a scoped follow-up question about the existing brief.
+
+    No tool calls. Reads brief + conversation, returns a prose answer as
+    an AIMessage. Terminal node for this graph invocation — the graph run
+    ends here, same as ask_clarification_node.
+    """
+    brief = state.get("trip_brief")
+
+    # Defensive: the router's fallback rule should prevent this path when
+    # there's no brief, but if we somehow get here without one, punt
+    # gracefully instead of crashing.
+    if brief is None:
+        fallback_msg = (
+            "I don't have a trip brief to follow up on yet. Want to tell me "
+            "about a trip you're planning?"
+        )
+        return {"messages": [AIMessage(content=fallback_msg)]}
+
+    prompt = BRIEF_QA_PROMPT.format(
+        brief_summary=_format_brief_for_qa(brief)
+    )
+
+    # Send the full conversation history so brief_qa can see context —
+    # e.g. if the user's follow-up refers to something they said several
+    # turns ago, or refines an earlier follow-up.
+    structured_llm = llm.with_structured_output(BriefQAResult)
+    result: BriefQAResult = structured_llm.invoke(
+        [("system", prompt), *_to_lc_messages(state["messages"])]
+    )
+
+    return {"messages": [AIMessage(content=result.answer)]}
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Node 6: OTHER_RESPONSE  (Weekend 4)
+# ──────────────────────────────────────────────────────────────────────
+OTHER_RESPONSE_TEXT = (
+    "I'm a travel research assistant — I can plan trips (destination, "
+    "dates, weather, restaurants, attractions) and answer follow-up "
+    "questions about a trip we've already discussed. What can I help "
+    "you plan?"
+)
+
+
+def other_response_node(state: TripState) -> dict:
+    """Return a canned friendly deflection for chit-chat / meta / off-topic.
+
+    No LLM call. Terminal node.
+    """
+    return {"messages": [AIMessage(content=OTHER_RESPONSE_TEXT)]}
 # ──────────────────────────────────────────────────────────────────────
 # Helpers
 # ──────────────────────────────────────────────────────────────────────
@@ -530,3 +654,92 @@ if __name__ == "__main__":
           f"{bypass_result['pending_clarification']}")
     print(f"   route={bypass_result['route']} (placeholder; "
           f"graph will route to scope regardless)")
+        # ── brief_qa_node sanity checks ──
+    print("\n" + "=" * 60)
+    print("Brief QA — sanity checks")
+    print("=" * 60)
+
+    from schemas import TripBrief, Place
+
+    # A realistic Chicago brief to follow up on
+    chicago_brief = TripBrief(
+        destination="Chicago, IL",
+        start_date=date(2026, 10, 3),
+        end_date=date(2026, 10, 5),
+        weather_summary="Cool and clear, highs around 65°F.",
+        restaurants=[
+            Place(name="Pizano's", type="pizza",
+                  address="61 E Madison St, Chicago"),
+            Place(name="Lou Mitchell's", type="diner",
+                  address="565 W Jackson Blvd, Chicago"),
+        ],
+        attractions=[
+            Place(name="Money Museum", type="museum",
+                  address="230 S LaSalle St, Chicago"),
+        ],
+        notes=["OSM data was thin — expect more options in real Chicago than listed."],
+    )
+
+    def _run_qa_case(label: str, user_msg: str, brief=chicago_brief) -> None:
+        print(f"\n─── {label} ───")
+        state = _make_state(user_msg, has_brief=False)
+        state["trip_brief"] = brief  # override the stub with our real brief
+        result = brief_qa_node(state)
+        answer = result["messages"][-1].content
+        print(f"Q: {user_msg}")
+        print(f"A: {answer[:300]}{'...' if len(answer) > 300 else ''}")
+
+    _run_qa_case(
+        "answerable from brief",
+        "Which restaurant would you go to for breakfast?",
+    )
+
+    _run_qa_case(
+        "not in the brief — should punt gracefully",
+        "Any good deep-dish pizza spots you'd add?",
+    )
+
+    _run_qa_case(
+        "asks about weather — already in brief",
+        "How's the weather looking again?",
+    )
+
+    _run_qa_case(
+        "defensive: no brief in state",
+        "Where should I have dinner?",
+        brief=None,
+    )
+    # Regression test for the strict sourcing rule (Step 3.5).
+    # This is the exact case that motivated hardening the prompt: an
+    # earlier version named Lou Malnati's and Giordano's when asked
+    # about deep-dish, even though neither was returned by any tool.
+    # Assert that the hardened prompt does NOT name specific venues
+    # absent from the brief.
+    print("\n─── strict sourcing: deep-dish leak check ───")
+    leak_state = _make_state(
+        "Any good deep-dish pizza spots you'd add?",
+        has_brief=False,
+    )
+    leak_state["trip_brief"] = chicago_brief
+    leak_result = brief_qa_node(leak_state)
+    leak_answer = leak_result["messages"][-1].content
+    print(f"A: {leak_answer}")
+
+    # Venues that were NOT in the brief and must not appear
+    forbidden = ["Lou Malnati", "Giordano", "Pequod", "Gino's East", "Uno"]
+    lower_answer = leak_answer.lower()
+    leaks = [name for name in forbidden if name.lower() in lower_answer]
+    if leaks:
+        print(f"❌ LEAK: named venues absent from brief: {leaks}")
+    else:
+        print("✅ no forbidden venues named")
+        
+    # ── other_response_node sanity check ──
+    print("\n" + "=" * 60)
+    print("Other Response — sanity check")
+    print("=" * 60)
+    other_result = other_response_node(_make_state("thanks!"))
+    other_msg = other_result["messages"][-1].content
+    print(f"\nCanned response:\n{other_msg}")
+    ok = "✅" if "travel research assistant" in other_msg.lower() else "❌"
+    print(f"\n{ok} contains expected phrasing")
