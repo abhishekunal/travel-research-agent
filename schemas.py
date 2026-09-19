@@ -13,7 +13,7 @@ Public models:
                   restaurants[], attractions[], notes)
 """
 
-from typing import TypedDict, Annotated
+from typing import TypedDict, Annotated, Literal
 from langgraph.graph.message import add_messages
 from datetime import date
 from pydantic import BaseModel, Field, field_validator
@@ -182,6 +182,28 @@ class SynthesisResult(BaseModel):
         description="Two to four sentences explaining why these specific picks fit the traveler, and noting any data gaps or tradeoffs"
     )
 
+# ── RouterDecision: the internal return type of the intent_router node ──
+# The router classifies each user turn into one of four intents so the
+# graph can route to the right downstream path. Single field, one label,
+# no confidence score — we found calibrated confidence isn't reliable
+# from LLM self-reports, and a hard fallback rule handles ambiguity
+# better than a threshold. See intent_router_node for the routing logic.
+class RouterDecision(BaseModel):
+    """Bundled output of the intent_router stage's LLM call."""
+
+    route: Literal["new_trip", "refinement", "follow_up", "other"] = Field(
+        description=(
+            "Classification of the user's latest turn:\n"
+            "- 'new_trip': user is planning a fresh, distinct trip\n"
+            "- 'refinement': user is modifying the current trip's parameters\n"
+            "  (dates, destination swap, duration, interests, constraints)\n"
+            "- 'follow_up': user is asking a scoped question about the "
+            "existing brief that can be answered from state, not re-research\n"
+            "- 'other': meta-question, chit-chat, or off-topic"
+        )
+    )
+
+
 # ── TripState: the shared "clipboard" flowing through the graph ──────
 # Every LangGraph node reads from and writes to this single object.
 # TypedDict (not Pydantic) because LangGraph's state machinery has
@@ -190,22 +212,30 @@ class SynthesisResult(BaseModel):
 # it (the default merge behavior for other fields).
 #
 # Field lifecycle:
-#   messages           — grows across the whole conversation
-#   intent             — set by scope, read by research + synthesize
-#   missing_fields     — set by scope; if non-empty, we route to clarify
+#   messages            — grows across the whole conversation
+#   route               — set by intent_router each turn, drives routing
+#   pending_clarification — set True by ask_clarification, checked and
+#                           reset by intent_router; lets the router
+#                           bypass classification when the user is
+#                           answering a scope question
+#   is_refinement       — set by intent_router when route == "refinement";
+#                           read by synthesize to prepend an acknowledgment
+#   intent              — set by scope, read by research + synthesize
+#   missing_fields      — set by scope; if non-empty, we route to clarify
 #   clarifying_question — set by scope, read by ask_clarification
-#   tool_results       — set by research, read by synthesize
-#   tool_errors        — set by research (skip-and-note), read by synthesize
-#   trip_brief         — set by synthesize, read by the UI
-#   reasoning          — set by synthesize, read by the UI
+#   tool_results        — set by research, read by synthesize
+#   tool_errors         — set by research (skip-and-note), read by synthesize
+#   trip_brief          — set by synthesize, read by the UI AND by brief_qa
+#   reasoning           — set by synthesize, read by the UI
 class TripState(TypedDict):
     """Shared state passed between nodes in the travel research graph."""
 
-    # `Annotated[..., add_messages]` tells LangGraph: when a node returns
-    # an update to `messages`, APPEND those messages to the existing list
-    # instead of replacing the list. This is how conversation history
-    # accumulates across turns and across nodes.
     messages: Annotated[list, add_messages]
+
+    # Populated by intent_router (Weekend 4)
+    route: str | None
+    pending_clarification: bool
+    is_refinement: bool
 
     # Populated by scope
     intent: Intent | None
@@ -279,10 +309,14 @@ if __name__ == "__main__":
     # not a runtime check — TypedDict doesn't enforce at construction,
     # it just gives static type checkers a shape to verify. Creating one
     # here proves the imports work and the type is well-formed.)
+    # Extended in Weekend 4 with router-driven fields.
     print("\n" + "─" * 50)
     print("Testing TripState construction...")
     initial_state: TripState = {
         "messages": [],
+        "route": None,
+        "pending_clarification": False,
+        "is_refinement": False,
         "intent": None,
         "missing_fields": [],
         "clarifying_question": None,
@@ -291,4 +325,20 @@ if __name__ == "__main__":
         "trip_brief": None,
         "reasoning": None,
     }
-    print(f"✅ TripState constructed with {len(initial_state)} fields") 
+    print(f"✅ TripState constructed with {len(initial_state)} fields")
+
+    # Test 6: RouterDecision accepts each of the four valid routes
+    print("\n" + "─" * 50)
+    print("Testing RouterDecision with each valid route...")
+    for route_label in ["new_trip", "refinement", "follow_up", "other"]:
+        decision = RouterDecision(route=route_label)
+        print(f"✅ Valid route parsed: {decision.route}")
+
+    # Test 7: RouterDecision rejects an invalid route
+    print("\n" + "─" * 50)
+    print("Testing RouterDecision with invalid route...")
+    try:
+        RouterDecision(route="somewhere_else")
+        print("❌ Should have raised an error but didn't!")
+    except Exception as e:
+        print(f"✅ Correctly rejected invalid route: {type(e).__name__}")    
