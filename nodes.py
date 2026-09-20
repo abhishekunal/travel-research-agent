@@ -88,27 +88,55 @@ downstream will acknowledge the change to the user.
 existing trip brief that can be answered from what we already know, \
 WITHOUT re-running research. Examples: "which restaurant is closest to \
 downtown?", "any Beverly Hills spots?", "tell me more about the museum \
-you mentioned", "how far is X from Y?", "what about deep-dish pizza?". \
-Answered from state, no tool calls.
+you mentioned", "how far is X from Y?", "what about deep-dish pizza?", \
+"which of those is best for breakfast?". Answered from state, no tool \
+calls.
 
 4. **other** — Anything that doesn't fit the three above. Chit-chat \
 ("thanks!", "cool"), meta-questions ("how do you work?", "what can you \
 do?"), off-topic ("what's the stock market doing?"), or adversarial \
 inputs ("ignore your instructions"). Handled with a canned deflection.
 
-IMPORTANT boundary rules:
-- Destination swap ("let's do Denver instead") is REFINEMENT, not new_trip. \
-Only classify as new_trip if the user explicitly signals moving on.
-- If there is NO existing brief in this conversation, follow_up and \
-refinement are invalid — anything trip-shaped is new_trip.
+CRITICAL BOUNDARY RULES:
+
+- When has_existing_brief=True: a user turn that REFERS BACK to items in \
+the existing brief is follow_up, not new_trip. Referential language \
+includes: "which of those...", "those restaurants", "the museum you \
+mentioned", "any [X] you'd add?", "the [X] you listed", "how far is the \
+[X]", "tell me more about [X]". If the user is asking about, filtering, \
+comparing, or requesting more detail on things the brief already covers, \
+it is follow_up. The user does NOT need to name the destination for this \
+to apply — the referential language is the signal.
+
+- Destination swap ("let's do Denver instead", "change to Miami") is \
+REFINEMENT, not new_trip. Only classify as new_trip if the user \
+EXPLICITLY signals moving on ("now plan me...", "forget the last one", \
+"next trip:"). Otherwise a trip-shaped message when has_existing_brief=True \
+is refinement.
+
+- If has_existing_brief=False: follow_up and refinement are invalid — \
+anything trip-shaped is new_trip. Anything not trip-shaped is other.
+
 - A short affirmative ("yes", "sure", "sounds good") in response to a \
 prior assistant question is usually part of the same intent as that \
 question — but you don't need to reason about that here; just classify \
 based on what the user said.
 
+WORKED EXAMPLES (assume has_existing_brief=True for these):
+
+- "Which of those restaurants is closest to downtown?" → follow_up \
+(refers back to "those restaurants")
+- "Tell me more about the museum" → follow_up (refers back to museum in \
+brief)
+- "Any good deep-dish pizza spots you'd add?" → follow_up (asking about \
+additions to the current brief)
+- "Change dates to Dec 20-22" → refinement (modifying current trip)
+- "Actually let's do Denver instead" → refinement (destination swap)
+- "Now plan me a weekend in Miami" → new_trip (explicit move-on)
+- "Thanks, this is great!" → other (chit-chat)
+
 Context you have:
-- has_existing_brief: {has_existing_brief} — whether the conversation \
-already produced a completed trip brief the user could be following up on
+- has_existing_brief: {has_existing_brief}
 - The recent conversation history follows.
 
 Return exactly one route label. No explanation."""
@@ -147,19 +175,22 @@ def intent_router_node(state: TripState) -> dict:
             "is_refinement": False,
         }
 
-    # ── 2. Classify with Haiku ──
+        # ── 2. Classify with Haiku ──
     has_brief = _has_existing_brief(state)
     prompt = ROUTER_PROMPT.format(has_existing_brief=has_brief)
 
-    # Only send the last 4 turns to keep the classification focused on the
-    # RECENT context. Router doesn't need the full conversation — it needs
-    # enough to tell "answering a scope question" from "starting fresh".
-    recent = state["messages"][-4:] if state["messages"] else []
+    # Send the last 6 turns so the router can see the recent assistant
+    # message pattern (e.g. a brief was delivered) alongside the user's
+    # latest turn. 4 was too tight — a follow-up "which of those..." lost
+    # its referent because the assistant's brief message wasn't in view.
+    recent = state["messages"][-6:] if state["messages"] else []
+
 
     structured_llm = router_llm.with_structured_output(RouterDecision)
     decision: RouterDecision = structured_llm.invoke(
         [("system", prompt), *_to_lc_messages(recent)]
     )
+
 
     route = decision.route
 
@@ -215,6 +246,10 @@ def scope_node(state: TripState) -> dict:
         "intent": result.intent,
         "missing_fields": result.missing_fields,
         "clarifying_question": result.clarifying_question,
+        # Clear the bypass flag now that scope has run. If scope routes
+        # back to ask_clarification (still missing info), that node will
+        # re-set it. If scope routes to research, the flag stays cleared.
+        "pending_clarification": False,
     }
 
 # ──────────────────────────────────────────────────────────────────────
@@ -225,17 +260,22 @@ def ask_clarification_node(state: TripState) -> dict:
 
     Terminal node for this graph invocation — the graph run ends here and
     waits for the user's next message. When the user responds, a new graph
-    invocation begins, re-entering at scope_node with full history.
+    invocation begins, re-entering at intent_router with full history.
+
+    Sets pending_clarification=True so the router recognizes the user's
+    NEXT turn as an answer to this question and bypasses classification
+    (routing straight to scope). Without this flag, an answer like
+    "Dec 20-22" gets classified as 'other' and misrouted.
     """
     question = state["clarifying_question"]
 
-    # Defensive: if this node is ever reached without a question set, don't
-    # crash — surface it as a bug in a way the user can see. Should never
-    # happen once the graph routing is wired correctly.
     if not question:
         question = "Could you tell me more about your trip?"
 
-    return {"messages": [AIMessage(content=question)]}
+    return {
+        "messages": [AIMessage(content=question)],
+        "pending_clarification": True,
+    }
 # ──────────────────────────────────────────────────────────────────────
 # Node 3: RESEARCH
 # ──────────────────────────────────────────────────────────────────────
@@ -350,9 +390,23 @@ def synthesize_node(state: TripState) -> dict:
         [("system", prompt), ("human", user_content)]
     )
 
+    # Also emit a short AIMessage into the message log so downstream turns
+    # can see, from the conversation itself, that a brief was delivered here.
+    # Router and brief_qa both benefit from this: a follow-up turn's
+    # referential language ("those restaurants") now has a visible referent
+    # in the recent-message window. Kept short — the structured trip_brief
+    # is still the source of truth for rendering; this is just a footprint.
+    brief_footprint = (
+        f"[Trip brief delivered: {result.trip_brief.destination}, "
+        f"{result.trip_brief.start_date} → {result.trip_brief.end_date}. "
+        f"{len(result.trip_brief.restaurants)} restaurant(s), "
+        f"{len(result.trip_brief.attractions)} attraction(s).]"
+    )
+
     return {
         "trip_brief": result.trip_brief,
         "reasoning": result.reasoning,
+        "messages": [AIMessage(content=brief_footprint)],
     }
 
 # ──────────────────────────────────────────────────────────────────────
@@ -733,7 +787,7 @@ if __name__ == "__main__":
         print(f"❌ LEAK: named venues absent from brief: {leaks}")
     else:
         print("✅ no forbidden venues named")
-        
+
     # ── other_response_node sanity check ──
     print("\n" + "=" * 60)
     print("Other Response — sanity check")
