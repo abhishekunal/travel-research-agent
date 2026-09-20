@@ -188,6 +188,27 @@ class SynthesisResult(BaseModel):
 # no confidence score — we found calibrated confidence isn't reliable
 # from LLM self-reports, and a hard fallback rule handles ambiguity
 # better than a threshold. See intent_router_node for the routing logic.
+
+# ── BriefQAResult: the internal return type of the brief_qa node ──────
+# brief_qa answers a follow-up question about the existing trip brief
+# without calling tools. Two fields:
+#   answer            — the scoped prose response to render in a chat bubble
+#   answerable_from_state — True if the answer was drawn from the brief +
+#                           conversation, False if brief_qa had to admit
+#                           it doesn't have enough info and offered a
+#                           re-plan. This lets the UI (and future logging)
+#                           distinguish clean answers from graceful punts.
+class BriefQAResult(BaseModel):
+    """Bundled output of the brief_qa stage's LLM call."""
+
+    answer: str = Field(
+        description="A scoped prose response to the user's follow-up question, drawn from the existing trip brief and prior conversation. If insufficient information is available, honestly say so and offer to re-plan."
+    )
+
+    answerable_from_state: bool = Field(
+        description="True if the answer was drawn from the existing brief/conversation; False if brief_qa couldn't answer and offered a re-plan instead."
+    )
+
 class RouterDecision(BaseModel):
     """Bundled output of the intent_router stage's LLM call."""
 
@@ -341,4 +362,24 @@ if __name__ == "__main__":
         RouterDecision(route="somewhere_else")
         print("❌ Should have raised an error but didn't!")
     except Exception as e:
-        print(f"✅ Correctly rejected invalid route: {type(e).__name__}")    
+        print(f"✅ Correctly rejected invalid route: {type(e).__name__}")
+
+    # Test 8: BriefQAResult accepts a normal answer
+    print("\n" + "─" * 50)
+    print("Testing BriefQAResult (answerable case)...")
+    qa = BriefQAResult(
+        answer="Pizano's is closest to downtown Chicago, in the Loop.",
+        answerable_from_state=True,
+    )
+    print(f"✅ BriefQAResult parsed: answerable_from_state={qa.answerable_from_state}")
+
+    # Test 9: BriefQAResult accepts a graceful punt
+    print("\n" + "─" * 50)
+    print("Testing BriefQAResult (punt case)...")
+    qa_punt = BriefQAResult(
+        answer="I don't have enough info to answer that from the current brief. Want me to plan a fresh trip?",
+        answerable_from_state=False,
+    )
+    print(f"✅ BriefQAResult parsed: answerable_from_state={qa_punt.answerable_from_state}")
+
+     
