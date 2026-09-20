@@ -276,6 +276,13 @@ if __name__ == "__main__":
         thread_id=thread_e,
     )
     _summarize(r_d)
+    # Weekend 4 Step 5 check: refinement should produce an acknowledgment
+    # prefix at the start of the reasoning field.
+    reasoning = r_d.get("reasoning") or ""
+    prefix_ok = "updated" in reasoning.lower()[:100] or "revised" in reasoning.lower()[:100]
+    marker = "✅" if prefix_ok else "❌"
+    print(f"  {marker} refinement acknowledgment prefix present: {prefix_ok}")
+    print(f"     reasoning starts with: {reasoning[:120]}...")
 
     # ── Test 6: other-response flow ──
     _header("Test 6: Off-topic / other")

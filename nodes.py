@@ -360,6 +360,16 @@ say so honestly. This field is what makes your brief useful vs. a bare \
 list — it should read like advice from a thoughtful friend, not a \
 summary of the data.
 
+5. REFINEMENT ACKNOWLEDGMENT: If the input includes "IS_REFINEMENT: True" \
+below, the user has just modified an earlier trip (changed the \
+destination, dates, duration, interests, or constraints). In that case, \
+BEGIN the reasoning field with one short sentence acknowledging the \
+change, using the pattern: "Updated your trip to [what changed — \
+destination / dates / duration / focus]. Here's the revised brief:" — \
+then continue with your normal 2-4 sentence reasoning. If \
+"IS_REFINEMENT: False", do NOT add this prefix. Do NOT invent a \
+refinement that didn't happen.
+
 Today's date is {today}."""
 
 
@@ -373,6 +383,7 @@ def synthesize_node(state: TripState) -> dict:
 
     prompt = SYNTHESIZE_PROMPT.format(today=date.today().isoformat())
 
+    is_refinement = state.get("is_refinement", False)
     user_content = (
         f"TRIP INTENT:\n"
         f"  City: {intent.city}\n"
@@ -382,7 +393,9 @@ def synthesize_node(state: TripState) -> dict:
         f"\n"
         f"RESEARCH SUMMARY:\n{research_summary}\n"
         f"\n"
-        f"TOOL ERRORS (if any):\n{tool_errors if tool_errors else '(none)'}"
+        f"TOOL ERRORS (if any):\n{tool_errors if tool_errors else '(none)'}\n"
+        f"\n"
+        f"IS_REFINEMENT: {is_refinement}"
     )
 
     structured_llm = llm.with_structured_output(SynthesisResult)
