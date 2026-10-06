@@ -273,12 +273,32 @@ if user_input:
         # Successful agent invocation — count it against the session budget.
         # This happens after the try/except, so failed calls don't count.
         st.session_state.query_count += 1
-        # Step C: The agent's response can be one of two shapes:
+        
+        # Step C: The agent's response can be one of three shapes:
         #   (a) A clarifying question — scope needed more info
         #   (b) A completed brief — scope had enough, synthesize ran
-        # Handle both and add to history for future re-renders.
+        #   (c) A plain assistant message — brief_qa answered a follow-up
+        #        about an existing brief, or other_response deflected a
+        #        chit-chat / off-topic turn. Rendered as prose in a chat
+        #        bubble; no card stack.
+        # Handle all three and add to history for future re-renders.
 
-        if result["clarifying_question"]:
+        route = result.get("route")
+
+        if route in ("follow_up", "other") and result.get("assistant_message"):
+            # Path (c): brief_qa or other_response ran THIS turn. Checked
+            # first and keyed on route, because trip_brief / reasoning from
+            # an earlier turn are still in checkpointed state and would
+            # otherwise win the elif chain below.
+            message = result["assistant_message"]
+            st.markdown(message)
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": message,
+                "brief": None,
+            })
+
+        elif result["clarifying_question"]:
             # Path (a): render the question, save to history.
             question = result["clarifying_question"]
             st.markdown(question)
@@ -302,10 +322,10 @@ if user_input:
 
         else:
             # Defensive: shouldn't hit this path given the graph's routing.
-            # If we do, surface it as an error rather than silently failing.
             st.error(
-                "The agent didn't produce a clarifying question or a trip "
-                "brief. This is likely a bug — try resetting the conversation."
+                "The agent didn't produce a clarifying question, a trip "
+                "brief, or a follow-up answer. This is likely a bug — try "
+                "resetting the conversation."
             )
 
 
