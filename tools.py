@@ -11,7 +11,7 @@ description the LLM reads to decide when to call it.
 This module owns:
   - Tool functions the agent can invoke
   - The external API glue for the OpenWeatherMap weather endpoint
-  - Delegation to osm_client.py for OpenStreetMap-backed tools
+  - Goole Places API calls for restaurants and attractions
 
 This module deliberately does NOT know about:
   - The LLM, the agent, or the graph — that's agent.py's job
@@ -27,7 +27,7 @@ from dotenv import load_dotenv
 
 from langchain_core.tools import tool
 
-import osm_client
+import places_client
 
 
 # ── Environment ───────────────────────────────────────────────────────
@@ -110,7 +110,7 @@ def search_restaurants(city: str) -> str:
         Returns an error message if the city can't be found.
     """
     try:
-        restaurants = osm_client.search_restaurants(city)
+        restaurants = places_client.search_restaurants(city)
         if not restaurants:
             return f"No restaurants found in {city}."
 
@@ -148,7 +148,7 @@ def search_attractions(city: str) -> str:
         Returns an error message if the city can't be found.
     """
     try:
-        attractions = osm_client.search_attractions(city)
+        attractions = places_client.search_attractions(city)
         if not attractions:
             return f"No attractions found in {city}."
 
