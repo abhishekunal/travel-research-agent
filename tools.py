@@ -11,7 +11,7 @@ description the LLM reads to decide when to call it.
 This module owns:
   - Tool functions the agent can invoke
   - The external API glue for the OpenWeatherMap weather endpoint
-  - Goole Places API calls for restaurants and attractions
+  - Google Places API calls for restaurants and attractions
 
 This module deliberately does NOT know about:
   - The LLM, the agent, or the graph — that's agent.py's job
@@ -89,7 +89,7 @@ def get_weather(city: str) -> str:
 
 # ── Restaurant tool ───────────────────────────────────────────────────
 @tool
-def search_restaurants(city: str) -> str:
+def search_restaurants(city: str, focus: str | None = None) -> str:
     """Find restaurants in a specific city for travel planning.
 
     Use this tool when the user asks about:
@@ -104,17 +104,23 @@ def search_restaurants(city: str) -> str:
     Args:
         city: The city to search in. Include state or country for clarity
               (e.g., "Austin, TX", "Paris, France", "Tokyo").
+        focus: Optional. A cuisine, dish, or dietary need taken from the
+               traveler's interests or constraints, in a few words
+               (e.g., "deep dish pizza", "vegetarian", "ramen"). Do not
+               include the word "restaurants". Omit it if the traveler
+               has no food-related interest.
 
     Returns:
         A formatted list of up to 5 restaurants with name, cuisine, and address.
         Returns an error message if the city can't be found.
     """
     try:
-        restaurants = places_client.search_restaurants(city)
+        restaurants = places_client.search_restaurants(city, focus=focus)
+        label = f"{focus} restaurants" if focus else "restaurants"
         if not restaurants:
-            return f"No restaurants found in {city}."
+            return f"No {label} found in {city}."
 
-        lines = [f"Restaurants in {city}:"]
+        lines = [f"Search: {label} in {city}"]
         for r in restaurants:
             lines.append(f"- {r['name']} ({r['type']}) at {r['address']}")
         return "\n".join(lines)
@@ -127,7 +133,7 @@ def search_restaurants(city: str) -> str:
 
 # ── Attractions tool ──────────────────────────────────────────────────
 @tool
-def search_attractions(city: str) -> str:
+def search_attractions(city: str, focus: str | None = None) -> str:
     """Find tourist attractions, museums, and landmarks in a specific city.
 
     Use this tool when the user asks about:
@@ -142,17 +148,22 @@ def search_attractions(city: str) -> str:
     Args:
         city: The city to search in. Include state or country for clarity
               (e.g., "Austin, TX", "Paris, France", "Tokyo").
+        focus: Optional. A sightseeing or activity interest from the
+               traveler's interests, in a few words (e.g., "architecture",
+               "jazz clubs", "art museums"). Omit it if the traveler has
+               no sightseeing-related interest.
 
     Returns:
         A formatted list of up to 5 attractions with name, type, and address.
         Returns an error message if the city can't be found.
     """
     try:
-        attractions = places_client.search_attractions(city)
+        attractions = places_client.search_attractions(city, focus=focus)
+        label = focus if focus else "attractions"
         if not attractions:
-            return f"No attractions found in {city}."
+            return f"No {label} found in {city}."
 
-        lines = [f"Attractions in {city}:"]
+        lines = [f"Search: {label} in {city}"]
         for a in attractions:
             lines.append(f"- {a['name']} ({a['type']}) at {a['address']}")
         return "\n".join(lines)

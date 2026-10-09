@@ -290,6 +290,18 @@ city. Do not skip any tool. If a tool fails or returns no results, note it \
 and move on — the downstream synthesis stage will handle partial data \
 gracefully.
 
+Call each places tool exactly ONCE — never twice, even to cover several \
+interests, because every places call costs money. Use the optional `focus` \
+argument to match the traveler:
+  - search_restaurants: if any interest or constraint is about food (a \
+cuisine, dish, or dietary need), pass the single most specific one as \
+focus, e.g. "deep dish pizza". Otherwise omit focus.
+  - search_attractions: if any interest is about sightseeing or activities, \
+pass the single most relevant one as focus, e.g. "architecture". Otherwise \
+omit focus.
+Never pass a food interest to search_attractions or a sightseeing interest \
+to search_restaurants.
+
 Report your findings as a clear, structured summary. Do not editorialize, \
 plan the trip, or make recommendations — that is the synthesis stage's job. \
 Your job is only to gather.

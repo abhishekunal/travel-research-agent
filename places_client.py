@@ -12,8 +12,12 @@ osm_client.py is NOT retired — guardrails.py still uses its Nominatim
 geocoder to validate that a city is real. Only the places searches moved.
 
 Public functions:
-    search_restaurants(city)    → list of restaurant dicts
-    search_attractions(city)    → list of attraction dicts
+    search_restaurants(city, focus=None)    → list of restaurant dicts
+    search_attractions(city, focus=None)    → list of attraction dicts
+
+`focus` (optional) narrows the search to the traveler's interests,
+e.g. focus="deep dish pizza" → "deep dish pizza restaurants in Chicago".
+Omit it for the generic search. Either way it is exactly ONE API call.
 
 Each place dict has a stable shape (matches schemas.Place):
     {"name": str, "type": str, "address": str}
@@ -55,6 +59,7 @@ FIELD_MASK = ",".join([
 # ── Defaults ──────────────────────────────────────────────────────────
 DEFAULT_LIMIT = 5        # Same as osm_client — enough for the agent, not overwhelming
 REQUEST_TIMEOUT = 10     # Google is fast; 10s is generous
+MAX_FOCUS_CHARS = 60     # A focus is a few words ("deep dish pizza"), never a paragraph
 
 # Daily cap, overridable via env var. Setting PLACES_DAILY_CAP=0 is a
 # free way to test the "quota exhausted" path without calling Google.
@@ -145,33 +150,60 @@ def _text_search(query: str, limit: int) -> list[dict]:
     return [_format_place(p) for p in response.json().get("places", [])]
 
 
-# ── Public functions (same signatures as osm_client) ──────────────────
-
-def search_restaurants(city: str, limit: int = DEFAULT_LIMIT) -> list[dict]:
+def _clean_focus(focus: str | None, drop_words: tuple[str, ...]) -> str:
     """
-    Find restaurants in the given city.
+    Normalize an optional focus string. Returns "" if there's no usable focus.
+
+    The LLM writes `focus`, and the LLM got it from what the USER typed —
+    so treat it as untrusted input: trim it, cap its length, and drop a
+    trailing word we're about to add ourselves (so "pizza restaurants"
+    doesn't become "pizza restaurants restaurants in Chicago").
+    """
+    if not focus:
+        return ""
+    words = focus.strip()[:MAX_FOCUS_CHARS].split()
+    while words and words[-1].lower() in drop_words:
+        words.pop()
+    return " ".join(words)
+
+
+# ── Public functions (osm_client signatures + optional focus) ─────────
+
+def search_restaurants(city: str, focus: str | None = None,
+                       limit: int = DEFAULT_LIMIT) -> list[dict]:
+    """
+    Find restaurants in the given city, optionally narrowed by `focus`
+    (a cuisine or dish, e.g. "deep dish pizza", "vegan", "ramen").
     Returns a list of {"name", "type", "address"} dicts.
     """
-    return _text_search(f"restaurants in {city}", limit)
+    focus = _clean_focus(focus, ("restaurant", "restaurants"))
+    query = f"{focus} restaurants in {city}" if focus else f"restaurants in {city}"
+    return _text_search(query, limit)
 
 
-def search_attractions(city: str, limit: int = DEFAULT_LIMIT) -> list[dict]:
+def search_attractions(city: str, focus: str | None = None,
+                       limit: int = DEFAULT_LIMIT) -> list[dict]:
     """
-    Find tourist attractions in the given city.
+    Find tourist attractions in the given city, optionally narrowed by
+    `focus` (e.g. "architecture", "jazz clubs", "art museums").
     Returns a list of {"name", "type", "address"} dicts.
 
-    Google's "tourist attractions" query already spans museums, landmarks,
-    viewpoints and parks — no need for OSM's union of tag types.
+    Without a focus, Google's "tourist attractions" query already spans
+    museums, landmarks, viewpoints and parks. With one, the focus replaces
+    "tourist attractions" ("art museums in Chicago"), because Google
+    matches a specific phrase better than "art museums tourist attractions".
     """
-    return _text_search(f"tourist attractions in {city}", limit)
+    focus = _clean_focus(focus, ("attraction", "attractions"))
+    query = f"{focus} in {city}" if focus else f"tourist attractions in {city}"
+    return _text_search(query, limit)
 
 
 # ── Optional: run this file directly to sanity-check ──────────────────
 if __name__ == "__main__":
     # 2 calls against the 5,000/month free tier.
     print(f"Testing places_client with 'Austin, TX' (daily cap = {DAILY_CAP})...\n")
-    print("Restaurants:")
-    for r in search_restaurants("Austin, TX", limit=3):
+    print("Restaurants (focus='barbecue'):")
+    for r in search_restaurants("Austin, TX", focus="barbecue", limit=3):
         print(f"  • {r['name']} ({r['type']}) — {r['address']}")
     print("\nAttractions:")
     for a in search_attractions("Austin, TX", limit=3):
