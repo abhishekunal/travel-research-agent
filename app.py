@@ -240,7 +240,7 @@ if user_input:
         st.markdown(user_input)
 
     # Step B: Run the agent. This is the slow part — real API calls to
-    # Claude + OpenWeatherMap + OSM. Show a spinner so the user knows
+    # Claude + OpenWeatherMap + Google Places. Show a spinner so the user knows
     # something is happening.
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
@@ -335,10 +335,10 @@ if user_input:
 with st.sidebar:
     st.subheader("About")
     st.write(
-        "Travel Research Agent — Weekend 3 build.\n\n"
-        "A conversational agent built with LangGraph, Claude Sonnet 4.5, "
-        "OpenStreetMap, and OpenWeatherMap. Ask about a destination, "
-        "answer any follow-up questions, and get a structured trip brief."
+        "A conversational travel research agent built with LangGraph, "
+        "Claude Sonnet 4.5, Google Places, and OpenWeatherMap. Ask about "
+        "a destination, answer any follow-up questions, and get a "
+        "structured trip brief."
     )
 
     st.markdown(
