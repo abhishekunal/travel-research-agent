@@ -26,7 +26,12 @@ Graph wiring (which node runs after which) lives in agent.py, not here.
 # package still expects). Keeping the stable pre-deprecation import
 # until the ecosystem versions align. Revisit when upgrading LangChain.
 from langgraph.prebuilt import create_react_agent
-from tools import get_weather, search_restaurants, search_attractions
+from tools import (
+    get_weather,
+    search_restaurants,
+    search_attractions,
+    search_travel_knowledge,
+)
 from datetime import date
 from dotenv import load_dotenv
 from langchain_anthropic import ChatAnthropic
@@ -280,15 +285,18 @@ def ask_clarification_node(state: TripState) -> dict:
 # Node 3: RESEARCH
 # ──────────────────────────────────────────────────────────────────────
 RESEARCH_PROMPT = """You are the RESEARCH stage of a travel research agent. \
-You have access to three tools:
+You have access to four tools:
   - get_weather: current weather in a city
   - search_restaurants: dining options in a city
   - search_attractions: sightseeing, museums, and landmarks in a city
+  - search_travel_knowledge: a curated knowledge base of cultural context, \
+local customs, logistics, when-to-go, budget, and day trips — for a limited \
+set of cities (see list below)
 
-Given a structured trip intent, call ALL three tools for the destination \
-city. Do not skip any tool. If a tool fails or returns no results, note it \
-and move on — the downstream synthesis stage will handle partial data \
-gracefully.
+Given a structured trip intent, call every applicable tool for the \
+destination city. Do not skip tools unnecessarily. If a tool fails or \
+returns no results, note it and move on — the downstream synthesis stage \
+will handle partial data gracefully.
 
 Call each places tool exactly ONCE — never twice, even to cover several \
 interests, because every places call costs money. Use the optional `focus` \
@@ -302,6 +310,20 @@ omit focus.
 Never pass a food interest to search_attractions or a sightseeing interest \
 to search_restaurants.
 
+Call search_travel_knowledge exactly ONCE per research turn, with:
+  - city: the destination (use exact spelling from the list below)
+  - query: a short phrase capturing general cultural and practical context \
+the traveler would benefit from, e.g. "cultural context, local customs, \
+and practical travel tips". When the traveler has a specific interest, \
+shape the query toward it (e.g. "dining etiquette and food culture" when \
+food is a stated interest, "neighborhood character and getting around" \
+when exploration is).
+AVAILABLE CITIES for search_travel_knowledge (exact spelling matters):
+  Tokyo, New York City, Chicago, Barcelona, Paris, Bangkok, Mumbai, Los Angeles
+If the destination is NOT in this list, SKIP search_travel_knowledge \
+entirely — the tool will return nothing useful for cities outside the \
+knowledge base.
+
 Report your findings as a clear, structured summary. Do not editorialize, \
 plan the trip, or make recommendations — that is the synthesis stage's job. \
 Your job is only to gather.
@@ -310,7 +332,7 @@ Your job is only to gather.
 # Build the ReAct agent once at module load — reused across all invocations.
 _research_agent = create_react_agent(
     model=llm,
-    tools=[get_weather, search_restaurants, search_attractions],
+    tools=[get_weather, search_restaurants, search_attractions, search_travel_knowledge],
     prompt=RESEARCH_PROMPT,
 )
 
