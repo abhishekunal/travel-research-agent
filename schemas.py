@@ -174,12 +174,23 @@ class ScopeResult(BaseModel):
 class SynthesisResult(BaseModel):
     """Bundled output of the synthesize stage's LLM call."""
 
+    # Field order matters here: Claude generates structured output in the
+    # order fields appear. Reasoning is first so it gets written while the
+    # model still has "fresh attention" — if trip_brief is first, on a
+    # complex query (many places, dense RAG context) the model finishes
+    # the big brief and then drops the trailing reasoning field.
+    reasoning: str = Field(
+        default="",
+        description="Two to four sentences explaining why these specific picks fit the traveler, and noting any data gaps or tradeoffs. ALWAYS include this — it's the editorial voice that makes the brief useful."
+    )
+    # Default of "" is a belt-and-suspenders fallback for the rare case
+    # where the model still drops the field. The UI treats empty reasoning
+    # as "skip the Trip Overview card," so the user still gets destination
+    # + weather + places + notes rather than a hard error. See app.py's
+    # render_brief_card for the handling.
+
     trip_brief: TripBrief = Field(
         description="Structured trip brief composed from research findings"
-    )
-
-    reasoning: str = Field(
-        description="Two to four sentences explaining why these specific picks fit the traveler, and noting any data gaps or tradeoffs"
     )
 
 # ── RouterDecision: the internal return type of the intent_router node ──

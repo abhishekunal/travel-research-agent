@@ -374,25 +374,26 @@ job is to compose a final trip brief that a real traveler could use.
 
 Rules:
 
-1. Fill every field in the TripBrief schema from the research summary. \
+1. ALWAYS write the reasoning field — 2 to 4 sentences explaining WHY \
+these specific picks fit the traveler's stated interests and constraints. \
+If the research didn't turn up enough to confidently match a constraint, \
+say so honestly. This field is what makes your brief useful vs. a bare \
+list — it should read like advice from a thoughtful friend, not a \
+summary of the data. Omitting reasoning silently removes the opener the \
+user sees first; do not skip it even when the brief is long.
+
+2. Fill every field in the TripBrief schema from the research summary. \
 Extract restaurants and attractions as Place objects. Preserve names and \
 addresses exactly as given.
 
-2. For weather_summary: report what the research shows, but frame it \
+3. For weather_summary: report what the research shows, but frame it \
 correctly. If the trip is more than a few days out, the weather data is \
 CURRENT conditions in the destination — not a forecast. Say so plainly \
 (e.g. "Current conditions in Austin are..."). Do NOT invent forecasts.
 
-3. In the notes field, capture: any tool that failed, any constraint that \
+4. In the notes field, capture: any tool that failed, any constraint that \
 couldn't be verified against the available data, and any relevant caveats \
 about the picks (seasonal issues, missing addresses, etc.).
-
-4. In the reasoning field, write 2-4 sentences explaining WHY these \
-specific picks fit the traveler's stated interests and constraints. If \
-the research didn't turn up enough to confidently match a constraint, \
-say so honestly. This field is what makes your brief useful vs. a bare \
-list — it should read like advice from a thoughtful friend, not a \
-summary of the data.
 
 5. REFINEMENT ACKNOWLEDGMENT: If the input includes "IS_REFINEMENT: True" \
 below, the user has just modified an earlier trip (changed the \

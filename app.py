@@ -56,6 +56,34 @@ st.set_page_config(
     layout="centered",
 )
 
+# ---------------------------------------------------------------
+# 1b. CUSTOM CSS
+# ---------------------------------------------------------------
+# A single injected stylesheet for cosmetic flourishes Streamlit's
+# built-in components don't cover. Kept small on purpose — this is
+# a portfolio demo, not a design system.
+#
+# .rag-note: the gray-with-left-accent note card used for the agent's
+#   "skip-and-note" disclosures (e.g. "Milan was not in the knowledge
+#   base"). rgba() backgrounds work on both light and dark themes.
+st.markdown(
+    """
+    <style>
+    .rag-note {
+        background: rgba(128, 128, 128, 0.08);
+        border-left: 3px solid #64748b;
+        border-radius: 4px;
+        padding: 10px 14px;
+        margin: 6px 0;
+        font-size: 0.92em;
+        line-height: 1.5;
+        color: inherit;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 
 # ---------------------------------------------------------------
 # 2. SESSION STATE INITIALIZATION
@@ -109,8 +137,22 @@ st.caption(
 # On every re-run, redraw every message we've accumulated in session_state.
 # This is what makes the chat scroll feel persistent even though the
 # script is re-executing top-to-bottom on every interaction.
-def render_brief_card(brief):
-    """Render a TripBrief as a stack of bordered cards inside a chat bubble."""
+def render_brief_card(brief, reasoning: str | None = None):
+    """Render a TripBrief as a stack of bordered cards inside a chat bubble.
+
+    Args:
+        brief: the TripBrief Pydantic model from state.
+        reasoning: optional agent-written paragraph that frames the brief.
+            When provided, it renders inside a bordered "Trip Overview"
+            card at the top of the stack — same card style as Weather,
+            Restaurants, etc. so the whole brief reads as one system.
+    """
+
+    # --- Trip Overview card (the agent's reasoning paragraph) ---
+    if reasoning:
+        with st.container(border=True):
+            st.markdown("### 🧭 Trip Overview")
+            st.markdown(reasoning)
 
     # --- Header card: destination + dates ---
     with st.container(border=True):
@@ -120,10 +162,18 @@ def render_brief_card(brief):
             f"{brief.end_date.strftime('%b %d, %Y')}**"
         )
 
-    # --- Notes banner (skip-and-note + any caveats) ---
+    # --- Notes: gray cards with a left accent, not yellow warnings. ---
+    # The notes are honest disclosures from the agent ("filtered out
+    # off-geography results", "city not in RAG corpus"), not errors —
+    # Streamlit's st.warning() yellow reads as "something's wrong,"
+    # which misrepresents them. The .rag-note class is defined up in
+    # section 1b.
     if brief.notes:
         for note in brief.notes:
-            st.warning(note)
+            st.markdown(
+                f'<div class="rag-note">{note}</div>',
+                unsafe_allow_html=True,
+            )
 
     # --- Weather card ---
     if brief.weather_summary:
@@ -155,16 +205,18 @@ def render_brief_card(brief):
 # Draw every message that's already in the history.
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
-        # Every message has some text content — a user's question, an
-        # agent's clarifying question, or an agent's reasoning paragraph
-        # that accompanies the brief.
-        if msg["content"]:
-            st.markdown(msg["content"])
-
-        # Assistant turns that include a trip brief render the cards
-        # below the reasoning text, all inside the same chat bubble.
+        # Three message shapes:
+        #   (1) brief + content → content is the agent's reasoning
+        #       paragraph; both go inside render_brief_card's new
+        #       Trip Overview card so they read as one unit.
+        #   (2) content only → clarifying question or follow-up answer,
+        #       rendered as plain chat text.
+        #   (3) brief only (rare — reasoning was empty) → render brief,
+        #       Trip Overview card is skipped internally.
         if msg.get("brief"):
-            render_brief_card(msg["brief"])
+            render_brief_card(msg["brief"], reasoning=msg.get("content"))
+        elif msg["content"]:
+            st.markdown(msg["content"])
 
 
 # ---------------------------------------------------------------
@@ -309,11 +361,10 @@ if user_input:
             })
 
         elif result["trip_brief"]:
-            # Path (b): render the reasoning paragraph and the brief cards.
+            # Path (b): render the reasoning paragraph (as the Trip Overview
+            # card inside render_brief_card) alongside the brief cards.
             reasoning = result["reasoning"] or ""
-            if reasoning:
-                st.markdown(reasoning)
-            render_brief_card(result["trip_brief"])
+            render_brief_card(result["trip_brief"], reasoning=reasoning)
             st.session_state.messages.append({
                 "role": "assistant",
                 "content": reasoning,
