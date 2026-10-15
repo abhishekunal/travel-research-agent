@@ -56,7 +56,7 @@ Each stage has its own prompt, its own responsibilities, and can be tested in is
 - Configure Streamlit secrets management (API keys move from `.env` to Streamlit's secrets UI)
 - Handle environment differences (file paths, package versions, memory persistence in deployed vs local)
 - Get a live URL like `travel-research-agent-abhishekunal.streamlit.app`
-- **Do NOT announce on LinkedIn yet** — this is a private launch to shake out deployment bugs before Weekend 4's public post
+- **Do NOT announce publicly yet** — this is a private launch to shake out deployment bugs before Weekend 4's public release
 
 **Why deploy this weekend instead of Weekend 4:** Deployment always breaks things in unexpected ways (paths, secrets, dependencies, memory persistence). Discovering those bugs a week before your public launch — not the night before — is the whole point.
 
@@ -115,7 +115,7 @@ Each stage has its own prompt, its own responsibilities, and can be tested in is
 Deliberately deferring to Weekend 4:
 - RAG pipeline
 - Evaluation suite (DeepEval)
-- Public LinkedIn launch
+- Public launch
 - Big README overhaul with screenshots + demo GIF
 
 Deferring beyond Weekend 4:
@@ -194,7 +194,7 @@ Things that only became visible from actually building and testing:
 The rationale for deploying but not announcing this weekend:
 
 1. **Deployment surfaces bugs local development hides.** File paths differ. Secrets management differs. Persistence differs. You want a full week to find and fix these bugs.
-2. **Weekend 4's LinkedIn post is stronger with RAG included.** A live URL with just memory reads as "solid tutorial project." A live URL with memory + prompt chaining + RAG reads as "sophisticated agent architecture."
+2. **Weekend 4's public launch is stronger with RAG included.** A live URL with just memory reads as "solid tutorial project." A live URL with memory + prompt chaining + RAG reads as "sophisticated agent architecture."
 3. **Risk mitigation.** If Weekend 4 hits problems with RAG or evals, you still have a working live app to fall back on. You can publicly launch the memory-only version and defer RAG to Weekend 5. Your launch isn't blocked on any single component.
 
 This is how real product launches work — deploy quietly, test in production, announce when it's solid.

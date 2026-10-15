@@ -8,7 +8,7 @@
 
 ## Goal
 
-"Fix the two visible product gaps surfaced during Weekend 3's quiet-launch testing (intent routing, places data quality), add a scoped RAG pipeline grounded in a curated travel knowledge base, and launch the project publicly on LinkedIn with a working URL."
+"Fix the two visible product gaps surfaced during Weekend 3's quiet-launch testing (intent routing, places data quality), add a scoped RAG pipeline grounded in a curated travel knowledge base, and launch the project publicly with a working URL."
 
 "Framing: Weekend 4 is the 'launch-ready' weekend. Weekend 3's hosted smoke test revealed that follow-up questions re-run the full pipeline (intent router gap) and that even best-case cities like Chicago return thin OSM results (data quality gap). Both are demo-killers for a public launch. This weekend closes those two gaps, adds RAG as the differentiating architectural piece, and ships publicly. Evals are deliberately deferred to Weekend 5+ — a launch that works and looks credible is worth more than a launch with evals but visible bugs."
 
@@ -43,13 +43,13 @@ New search_travel_knowledge tool alongside existing tools
 Update scope prompt so the agent knows when to reach for RAG vs. structured APIs
 What "scope-reduced" means: get the architecture into your portfolio (embeddings, chunking, retrieval), not a comprehensive corpus. The pattern is what matters for the AI PM story.
 
-### 4. Full README overhaul + LinkedIn launch
+### 4. Full README overhaul + public launch
 
 Live URL prominence, demo GIF or short screen recording, 2–3 static screenshots
 Updated architecture diagram reflecting intent router + RAG + memory
 Honest "known limitations" section — Weekend 5+ backlog items become visible portfolio strength
 Lessons learned section covering the PM-to-engineer journey
-LinkedIn post drafted, edited, posted on a weekday morning
+Launch announcement drafted, edited, posted on a weekday morning
 Post-launch monitoring plan documented — API cost check, comment responsiveness
 
 ### 5. Final polish + friend testing
@@ -92,7 +92,7 @@ Verify all cost caps are still holding after places API migration
 > Failures are logged and analyzed, not hidden
 
 **Launch is real:**
-> LinkedIn post is published
+> Public announcement is published
 > Live URL works when clicked from the post
 > README is embarrassment-proof
 > At least 2 friends have tested the app and given feedback
@@ -125,7 +125,7 @@ RAG indexing + retrieval tool + agent integration	3–4 hrs
 RAG end-to-end test + tuning	1–2 hrs
 Redeploy to Streamlit Cloud + verify hosted	1–2 hrs
 README overhaul + demo GIF + screenshots	3–4 hrs
-LinkedIn post drafting + editing	1–2 hrs
+Launch announcement drafting + editing	1–2 hrs
 Friend testing + final polish	1–2 hrs
 Total	17–26 hrs
 
@@ -134,7 +134,7 @@ First cut: RAG corpus size (ship with 3–5 destinations instead of 5–8)
 Second cut: Places API migration deferred to post-launch if cost research is inconclusive; stay on OSM with better README framing
 Third cut: Demo GIF (screenshots only for launch, add GIF later)
 
-**Protect at all costs:** RAG working end-to-end, live URL functional, LinkedIn post shipped. Everything else is polish.
+**Protect at all costs:** RAG working end-to-end, live URL functional, public launch shipped. Everything else is polish.
 
 ---
 
@@ -144,7 +144,7 @@ Google Places vs. Foursquare pricing — which fits the $30/month ceiling with r
  Wikivoyage API vs. manual download vs. hand-curated markdown — fastest path to a clean corpus?
  OpenAI embeddings vs. Voyage AI — cost/quality tradeoff for this use case?
  Chunking strategy: fixed size vs. semantic vs. structure-aware (by markdown headers)?
- For the LinkedIn post: single post vs. carousel/thread format?
+ For the launch announcement: single post vs. multi-part format?
 
 ---
 
@@ -165,10 +165,10 @@ Intent router node classifies turns and routes to appropriate downstream node
 
 ## Post-launch considerations
 
-Things to think about AFTER the LinkedIn post goes live:
+Things to think about AFTER the public launch:
 
 - Monitor API costs for the first week — if the app gets more traffic than expected, tighten caps or add real rate limiting
-- Respond to LinkedIn comments and questions (this is where the actual networking value happens)
+- Respond to comments and questions on the launch (this is where the real engagement happens)
 - Track any bugs users report — the first week post-launch is the best time to fix embarrassing issues
 - Consider a follow-up post 2–4 weeks later about lessons learned from real user feedback
 
